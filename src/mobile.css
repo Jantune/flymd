@@ -545,14 +545,14 @@ body.platform-mobile #ai-assist-win.dock-right {
     padding-left: 16px !important;
     padding-right: 16px !important;
     padding-top: 16px !important;
-    padding-bottom: 60px !important;  /* 增加底部留白，确保最后一行完整显示 */
+    padding-bottom: 48px !important;  /* 适中留白，确保最后一行完整显示且不造成过大滚动条 */
   }
 
   /* 确保预览正文在移动端正确居中 */
   body.platform-mobile .preview-body {
     max-width: 100%;
     margin: 0 auto;
-    padding: 0 !important;  /* 清零内部 padding，由外层 .preview 统一控制 */
+    padding: 0 12px !important;  /* 只保留左右12px padding，上下清零避免重叠 */
   }
 
   /* 修复：窄屏两端对齐会把中文“字间距”拉爆（看起来像不居中/排版错乱） */
