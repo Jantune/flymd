@@ -543,7 +543,7 @@ body.platform-mobile #ai-assist-win.dock-right {
   body.platform-mobile .preview {
     box-sizing: border-box !important;
     padding-left: 16px !important;
-    padding-right: 16px !important;
+    padding-right: 12px !important;  /* 滚动条变细后减少右侧padding，充分利用空间 */
     padding-top: 16px !important;
     padding-bottom: 48px !important;  /* 适中留白，确保最后一行完整显示且不造成过大滚动条 */
   }
