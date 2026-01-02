@@ -758,3 +758,19 @@ body.dark-mode.platform-mobile .menu-item {
 body.dark-mode.platform-mobile .menu-item:hover {
   background: rgba(255, 255, 255, 0.08) !important;
 }
+
+/* ========== 移动端滚动条优化 ========== */
+body.platform-mobile ::-webkit-scrollbar {
+  width: 4px !important;   /* 移动端使用更细的滚动条 */
+  height: 4px !important;
+}
+
+body.platform-mobile ::-webkit-scrollbar-thumb {
+  background: rgba(127, 127, 127, 0.3) !important;
+  border-radius: 2px !important;
+}
+
+/* 夜间模式滚动条 */
+body.dark-mode.platform-mobile ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25) !important;
+}
