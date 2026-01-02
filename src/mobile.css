@@ -541,15 +541,18 @@ body.platform-mobile #ai-assist-win.dock-right {
 
   /* 修复：移动端预览正文靠右问题 - 重置 workspace gap 为 0，确保 padding 对称 */
   body.platform-mobile .preview {
+    box-sizing: border-box !important;
     padding-left: 16px !important;
     padding-right: 16px !important;
+    padding-top: 16px !important;
+    padding-bottom: 60px !important;  /* 增加底部留白，确保最后一行完整显示 */
   }
 
   /* 确保预览正文在移动端正确居中 */
   body.platform-mobile .preview-body {
     max-width: 100%;
     margin: 0 auto;
-    padding: 14px 12px 20px 12px;
+    padding: 0 !important;  /* 清零内部 padding，由外层 .preview 统一控制 */
   }
 
   /* 修复：窄屏两端对齐会把中文“字间距”拉爆（看起来像不居中/排版错乱） */
@@ -723,4 +726,35 @@ body.platform-mobile .titlebar {
 /* 隐藏语言切换（移动端不常用） */
 body.platform-mobile #btn-lang {
   display: none !important;
+}
+
+/* ========== 夜间模式：移动端顶栏适配 ========== */
+body.dark-mode.platform-mobile .icon-button svg,
+body.dark-mode.platform-mobile .toolbar-btn svg {
+  stroke: var(--fg, #e5e7eb);
+  stroke-width: 2px;
+  fill: none;
+}
+
+body.dark-mode.platform-mobile .icon-button:active svg,
+body.dark-mode.platform-mobile .toolbar-btn:active svg {
+  stroke: var(--fg, #ffffff);
+}
+
+body.dark-mode.platform-mobile .titlebar {
+  background: var(--chrome-bg, #0f1114) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+body.dark-mode.platform-mobile .toolbar-btn:active,
+body.dark-mode.platform-mobile .icon-button:active {
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
+body.dark-mode.platform-mobile .menu-item {
+  color: var(--fg, #e5e7eb) !important;
+}
+
+body.dark-mode.platform-mobile .menu-item:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
 }
