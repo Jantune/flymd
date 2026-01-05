@@ -139,7 +139,15 @@ import {
   togglePluginDropdown,
   setPluginsMenuManagerOpener,
   getPluginsMenuItemsSnapshot,
+  getPluginDropdownItems,
 } from './extensions/pluginMenu'
+import { buildCommandPaletteCommands } from './core/commandPalette'
+import {
+  setCommandPaletteProvider,
+  openCommandPalette,
+  closeCommandPalette,
+  isCommandPaletteOpen,
+} from './ui/commandPalette'
 import { openLinkDialog, openRenameDialog } from './ui/linkDialogs'
 import { initExtensionsPanel, refreshExtensionsUI as panelRefreshExtensionsUI, showExtensionsOverlay as panelShowExtensionsOverlay, prewarmExtensionsPanel as panelPrewarmExtensionsPanel } from './extensions/extensionsPanel'
 import { initAboutOverlay, showAbout } from './ui/aboutOverlay'
@@ -3201,6 +3209,36 @@ function buildContextMenuContextFromTarget(targetElement: HTMLElement | null): C
 
 function buildContextMenuContext(e: MouseEvent): ContextMenuContext {
   return buildContextMenuContextFromTarget((e.target as HTMLElement | null) || null)
+}
+
+// 命令面板使用的右键上下文：不依赖鼠标命中节点（targetElement 为空）
+function buildContextMenuContextForPalette(): ContextMenuContext {
+  try {
+    const sel = editor.selectionStart || 0
+    const end = editor.selectionEnd || 0
+    let text = editor.value.slice(Math.min(sel, end), Math.max(sel, end))
+    if (wysiwygV2Active) {
+      try {
+        const wysSel = String(wysiwygV2GetSelectedText() || '')
+        text = wysSel
+      } catch {}
+    }
+    return {
+      selectedText: text,
+      cursorPosition: sel,
+      mode: wysiwygV2Active ? 'wysiwyg' : mode,
+      filePath: currentFilePath,
+      targetElement: null,
+    }
+  } catch {
+    return {
+      selectedText: '',
+      cursorPosition: 0,
+      mode: wysiwygV2Active ? 'wysiwyg' : mode,
+      filePath: currentFilePath,
+      targetElement: null,
+    }
+  }
 }
 
 function escapeAttrValue(input: string): string {
@@ -10807,6 +10845,8 @@ function bindEvents() {
   // 全局快捷键：Ctrl+H 打开查找替换
   document.addEventListener('keydown', (e: KeyboardEvent) => {
     try {
+      // 命令面板打开时，不抢占快捷键
+      if (isCommandPaletteOpen()) return
       // 查找面板打开时，回车键用于切换到下一个/上一个（在所有模式下都拦截）
       if (_findPanel && _findPanel.style.display !== 'none' && e.key === 'Enter') {
         e.preventDefault()
@@ -11261,6 +11301,23 @@ function bindEvents() {
         }
       }
     } catch {}
+    // 命令面板打开时：不再处理其它全局快捷键，避免抢输入
+    try {
+      if (isCommandPaletteOpen()) {
+        const isCtrlShiftP = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p'
+        if (isCtrlShiftP) {
+          e.preventDefault()
+          closeCommandPalette()
+        }
+        return
+      }
+    } catch {}
+    // Ctrl+Shift+P：命令面板（聚合扩展菜单+右键菜单）
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p') {
+      e.preventDefault()
+      await openCommandPalette()
+      return
+    }
     // Ctrl/Cmd+P：打印（移动端不拦截默认行为）
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
       const isMobileUi = document.body.classList.contains('platform-mobile') || document.body.classList.contains('platform-android')
@@ -12605,6 +12662,24 @@ const pluginMenuManagerHost: PluginMenuManagerHost = {
 // 将“菜单管理”入口挂接到“插件”下拉菜单的第一项
 setPluginsMenuManagerOpener(() => {
   void openPluginMenuManager(pluginMenuManagerHost)
+})
+
+// 命令面板：聚合“扩展菜单 + 右键菜单”入口（不收录依赖 targetElement 的项）
+setCommandPaletteProvider(async () => {
+  try {
+    return await buildCommandPaletteCommands({
+      getDropdownItems: () => {
+        try { return getPluginDropdownItems() || [] } catch { return [] }
+      },
+      getPluginContextMenuItems: () => {
+        try { return pluginContextMenuItems || [] } catch { return [] }
+      },
+      buildBuiltinContextMenuItems: (ctx) => buildBuiltinContextMenuItems(ctx),
+      getContextMenuContext: () => buildContextMenuContextForPalette(),
+    })
+  } catch {
+    return []
+  }
 })
 
 // 简单判断一个字符串是否更像本地路径（用于区分本地/远程安装）
