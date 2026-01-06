@@ -1085,7 +1085,7 @@ function updateSpeechRecordFabNow(): void {
       if (vv) {
         const kb = Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)))
         const bottom = kb > 80 ? (kb + 14) : 14
-        s.el.style.bottom = `calc(env(safe-area-inset-bottom) + ${bottom}px)`
+        s.el.style.bottom = `calc(var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + ${bottom}px)`
       }
     } catch {}
 
@@ -9194,7 +9194,8 @@ function showTopMenu(anchor: HTMLElement, items: TopMenuItemSpec[]) {
       // 移动端：底部动作面板，避免被状态栏遮挡
       menu.style.left = '8px'
       menu.style.right = '8px'
-      menu.style.bottom = 'calc(env(safe-area-inset-bottom) + var(--flymd-kb-inset-bottom, 0px) + 8px)'
+      menu.style.bottom =
+        'calc(var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + var(--flymd-kb-inset-bottom, 0px) + 8px)'
       menu.style.top = 'auto'
       menu.style.minWidth = 'unset'
       menu.style.maxHeight = '60vh'

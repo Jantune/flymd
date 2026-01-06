@@ -270,7 +270,8 @@ export async function showContextMenu(
       menu.style.left = '8px'
       menu.style.right = '8px'
       // 额外加上“键盘占用高度”（由 main.ts 通过 visualViewport 写入 CSS 变量）
-      menu.style.bottom = 'calc(env(safe-area-inset-bottom) + var(--flymd-kb-inset-bottom, 0px) + 8px)'
+      menu.style.bottom =
+        'calc(var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + var(--flymd-kb-inset-bottom, 0px) + 8px)'
       menu.style.top = 'auto'
       menu.style.maxHeight = '60vh'
       menu.style.overflow = 'auto'

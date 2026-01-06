@@ -5,13 +5,13 @@
   /* 移动端顶部栏高度：从 32px 增加到 44px（iOS 推荐最小触摸区域） */
   body.platform-mobile {
     --mobile-titlebar-h: 44px;
-    --mobile-titlebar-pad-top: env(safe-area-inset-top);
+    --mobile-titlebar-pad-top: var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px));
     --mobile-titlebar-total-h: calc(var(--mobile-titlebar-h) + var(--mobile-titlebar-pad-top));
   }
 
   /* Android：动态计算安全区，取系统安全区与 6px 的最大值（适配全面屏/刘海屏） */
   body.platform-android {
-    --mobile-titlebar-pad-top: max(env(safe-area-inset-top, 0px), 6px);
+    --mobile-titlebar-pad-top: max(var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)), 6px);
     --mobile-titlebar-total-h: calc(var(--mobile-titlebar-h) + var(--mobile-titlebar-pad-top));
   }
 
@@ -117,7 +117,7 @@ body.platform-mobile #mobile-selection-toolbar {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(env(safe-area-inset-bottom) + 12px);
+  bottom: calc(var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 12px);
   z-index: 10001;
   display: flex;
   align-items: center;
@@ -195,11 +195,20 @@ body.platform-mobile #mobile-selection-toolbar .mst-btn:active {
     -webkit-app-region: no-drag !important;
     app-region: no-drag !important;
     /* 让内容避开刘海/摄像头区域（沉浸式全屏时很关键） */
-    padding-top: var(--mobile-titlebar-pad-top, env(safe-area-inset-top)) !important;
-    padding-left: env(safe-area-inset-left) !important;
-    padding-right: env(safe-area-inset-right) !important;
-    height: var(--mobile-titlebar-total-h, calc(36px + env(safe-area-inset-top))) !important;
-    min-height: var(--mobile-titlebar-total-h, calc(36px + env(safe-area-inset-top))) !important;
+    padding-top:
+      var(--mobile-titlebar-pad-top, var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px))) !important;
+    padding-left: var(--flymd-safe-area-inset-left, env(safe-area-inset-left, 0px)) !important;
+    padding-right: var(--flymd-safe-area-inset-right, env(safe-area-inset-right, 0px)) !important;
+    height:
+      var(
+        --mobile-titlebar-total-h,
+        calc(36px + var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)))
+      ) !important;
+    min-height:
+      var(
+        --mobile-titlebar-total-h,
+        calc(36px + var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)))
+      ) !important;
     align-items: stretch !important;
     justify-content: flex-start !important;
     gap: 6px;
@@ -296,22 +305,30 @@ body.platform-mobile .upl-overlay {
   position: fixed !important;
   inset: 0 !important;
   /* 让内容避开刘海/手势条 */
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-top: var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px));
+  padding-bottom: var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
 }
 
 body.platform-mobile .upl-dialog {
   width: calc(100vw - 16px) !important;
   max-width: none !important;
   /* 先用 vh 兜底；支持 dvh 的再覆盖 */
-  height: calc(100vh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+  height:
+    calc(
+      100vh - 16px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
+        var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+    ) !important;
   max-height: none !important;
   border-radius: 12px !important;
 }
 
 @supports (height: 100dvh) {
   body.platform-mobile .upl-dialog {
-    height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    height:
+      calc(
+        100dvh - 16px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
+          var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+      ) !important;
   }
 }
 
@@ -361,8 +378,8 @@ body.platform-mobile .sync-toggles .lbl {
 body.platform-mobile .link-overlay {
   position: fixed !important;
   inset: 0 !important;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-top: var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px));
+  padding-bottom: var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
 }
 
 body.platform-mobile .link-dialog {
@@ -387,19 +404,27 @@ body.platform-mobile .link-actions button {
 
 /* ========== 移动端同步日志弹窗 ========== */
 body.platform-mobile .sync-log-overlay {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-top: var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px));
+  padding-bottom: var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
 }
 
 body.platform-mobile .sync-log-dialog {
   width: calc(100vw - 16px) !important;
-  max-height: calc(100vh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+  max-height:
+    calc(
+      100vh - 16px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
+        var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+    ) !important;
   border-radius: 12px !important;
 }
 
 @supports (height: 100dvh) {
   body.platform-mobile .sync-log-dialog {
-    max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    max-height:
+      calc(
+        100dvh - 16px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
+          var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+      ) !important;
   }
 }
 
@@ -407,7 +432,7 @@ body.platform-mobile .sync-log-dialog {
 body.platform-mobile .notification-container {
   left: 8px;
   right: 8px;
-  bottom: calc(env(safe-area-inset-bottom) + 84px);
+  bottom: calc(var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 84px);
   align-items: stretch;
 }
 
@@ -422,8 +447,8 @@ body.platform-mobile .notification-item {
 body.platform-android #flymd-speech-record-fab {
   display: none;
   position: fixed;
-  right: calc(env(safe-area-inset-right) + 12px);
-  bottom: calc(env(safe-area-inset-bottom) + 14px);
+  right: calc(var(--flymd-safe-area-inset-right, env(safe-area-inset-right, 0px)) + 12px);
+  bottom: calc(var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 14px);
   z-index: 10020;
   align-items: center;
   gap: 10px;
@@ -518,7 +543,7 @@ body.platform-mobile #ai-assist-win.dock-right {
   left: 0 !important;
   right: 0 !important;
   top: auto !important;
-  bottom: env(safe-area-inset-bottom) !important;
+  bottom: var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) !important;
   width: 100% !important;
   border-left: none !important;
   border-right: none !important;
@@ -576,21 +601,29 @@ body.platform-mobile #ai-assist-win.dock-right {
 body.platform-mobile .ext-overlay {
   position: fixed !important;
   inset: 0 !important;
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-top: var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px));
+  padding-bottom: var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
 }
 
 body.platform-mobile .ext-dialog {
   width: calc(100vw - 16px) !important;
   max-width: none !important;
-  height: calc(100vh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+  height:
+    calc(
+      100vh - 16px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
+        var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+    ) !important;
   max-height: none !important;
   border-radius: 12px !important;
 }
 
 @supports (height: 100dvh) {
   body.platform-mobile .ext-dialog {
-    height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+    height:
+      calc(
+        100dvh - 16px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
+          var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+      ) !important;
   }
 }
 

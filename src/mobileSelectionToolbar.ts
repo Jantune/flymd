@@ -194,7 +194,7 @@ export function initMobileSelectionToolbar(opt: MobileSelectionToolbarOptions): 
       if (!vv) return
       const kb = Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)))
       const bottom = kb > 80 ? (kb + 12) : 12
-      bar.style.bottom = `calc(env(safe-area-inset-bottom) + ${bottom}px)`
+      bar.style.bottom = `calc(var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + ${bottom}px)`
     } catch {}
   }
 

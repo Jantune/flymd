@@ -230,8 +230,8 @@ const dialogStyles = `
 
 /* 移动端：别假设 400px 的桌面宽度 */
 body.platform-mobile .custom-dialog-overlay {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-top: var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px));
+  padding-bottom: var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
 }
 
 body.platform-mobile .custom-dialog-box {
@@ -239,13 +239,21 @@ body.platform-mobile .custom-dialog-box {
   width: calc(100vw - 32px);
   max-width: calc(100vw - 32px);
   padding: 16px;
-  max-height: calc(100vh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  max-height:
+    calc(
+      100vh - 32px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
+        var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+    );
   overflow: auto;
 }
 
 @supports (height: 100dvh) {
   body.platform-mobile .custom-dialog-box {
-    max-height: calc(100dvh - 32px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    max-height:
+      calc(
+        100dvh - 32px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
+          var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+      );
   }
 }
 
