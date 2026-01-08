@@ -183,6 +183,49 @@ let katexCssLoaded = false
 let hljsLoaded = false
 let mermaidReady = false
 
+const KATEX_CRITICAL_STYLE_ID = 'flymd-katex-critical-style'
+function ensureKatexCriticalStyle() {
+  try {
+    if (document.getElementById(KATEX_CRITICAL_STYLE_ID)) return
+    const criticalStyle = document.createElement('style')
+    criticalStyle.id = KATEX_CRITICAL_STYLE_ID
+    criticalStyle.textContent = `
+      /* KaTeX critical styles：仅作为 CSS 动态加载失败时的兜底；作用域限制在预览区，避免污染所见模式 */
+      .preview-body .katex svg {
+        fill: currentColor;
+        stroke: currentColor;
+        fill-rule: nonzero;
+        fill-opacity: 1;
+        stroke-width: 1;
+        stroke-linecap: butt;
+        stroke-linejoin: miter;
+        stroke-miterlimit: 4;
+        stroke-dasharray: none;
+        stroke-dashoffset: 0;
+        stroke-opacity: 1;
+        display: block;
+        height: inherit;
+        position: absolute;
+        width: 100%;
+      }
+      .preview-body .katex svg path { stroke: none; }
+      .preview-body .katex .stretchy { display: block; overflow: hidden; position: relative; width: 100%; }
+      .preview-body .katex .hide-tail { overflow: hidden; position: relative; width: 100%; }
+      .preview-body .katex .halfarrow-left { left: 0; overflow: hidden; position: absolute; width: 50.2%; }
+      .preview-body .katex .halfarrow-right { overflow: hidden; position: absolute; right: 0; width: 50.2%; }
+      .preview-body .katex .brace-left { left: 0; overflow: hidden; position: absolute; width: 25.1%; }
+      .preview-body .katex .brace-center { left: 25%; overflow: hidden; position: absolute; width: 50%; }
+      .preview-body .katex .brace-right { overflow: hidden; position: absolute; right: 0; width: 25.1%; }
+      .preview-body .katex .x-arrow-pad { padding: 0 .5em; }
+      .preview-body .katex .cd-arrow-pad { padding: 0 .55556em 0 .27778em; }
+      .preview-body .katex .mover,
+      .preview-body .katex .munder,
+      .preview-body .katex .x-arrow { text-align: center; }
+    `
+    document.head.appendChild(criticalStyle)
+  } catch {}
+}
+
 // Mermaid 工具（已拆分到 core/mermaid.ts）
 import { isMermaidCacheDisabled, getMermaidScale, setMermaidScaleClamped, adjustExistingMermaidSvgsForScale, exportMermaidViaDialog, createMermaidToolsFor, mermaidSvgCache, mermaidSvgCacheVersion, getCachedMermaidSvg, cacheMermaidSvg, normalizeMermaidSvg, postAttachMermaidSvgAdjust, invalidateMermaidSvgCache, MERMAID_SCALE_MIN, MERMAID_SCALE_MAX, MERMAID_SCALE_STEP } from './core/mermaid'
 // 当前 PDF 预览 URL（iframe 使用），用于页内跳转
@@ -3961,18 +4004,8 @@ async function renderPreviewLight() {
           await import('katex/dist/katex.min.css')
           katexCssLoaded = true
 
-          // 手动注入关键 CSS 规则（同阅读模式）
-          const criticalStyle = document.createElement('style')
-          criticalStyle.textContent = `
-            /* KaTeX critical styles for production build */
-            .katex { font-size: 1em; text-indent: 0; text-rendering: auto; }
-            .katex svg { display: inline-block; position: relative; width: 100%; height: 100%; }
-            .katex svg path { fill: currentColor; }
-            .katex .hide-tail { overflow: hidden; }
-            .md-math-inline .katex { display: inline-block; }
-            .md-math-block .katex { display: block; text-align: center; }
-          `
-          document.head.appendChild(criticalStyle)
+          // 手动注入“只影响预览区”的关键 CSS 兜底，避免全局覆盖导致所见模式错乱
+          ensureKatexCriticalStyle()
         }
 
         // 渲染每个数学节点
@@ -5258,8 +5291,13 @@ async function ensureRenderer() {
   }
 }
 
+type RenderPreviewOptions = {
+  // 打印：不要插入所见模式的模拟光标等交互性标记
+  forPrint?: boolean
+}
+
 // 渲染预览（带安全消毒）
-async function renderPreview() {
+async function renderPreview(opts?: RenderPreviewOptions) {
   console.log('=== 开始渲染预览 ===')
   // 首次预览开始打点
   try { if (!(renderPreview as any)._firstLogged) { (renderPreview as any)._firstLogged = true; logInfo('打点:首次预览开始') } } catch {}
@@ -5267,7 +5305,7 @@ async function renderPreview() {
   let raw = editor.value
   // 所见模式：用一个“.”标记插入点，优先不破坏 Markdown 结构
   try {
-    if (wysiwyg && mode !== 'preview') {
+    if (wysiwyg && mode !== 'preview' && !opts?.forPrint) {
       const st = editor.selectionStart >>> 0
       const before = raw.slice(0, st)
       const after = raw.slice(st)
@@ -5387,6 +5425,7 @@ async function renderPreview() {
     if (!katexCssLoaded && /katex/.test(html)) {
       await import('katex/dist/katex.min.css')
       katexCssLoaded = true
+      ensureKatexCriticalStyle()
     }
   } catch {}
   console.log('Markdown 渲染后的 HTML 片段:', html.substring(0, 500))
@@ -5417,37 +5456,8 @@ async function renderPreview() {
           await import('katex/dist/katex.min.css')
           katexCssLoaded = true
 
-          // 手动注入关键 CSS 规则以确保根号等符号正确显示
-          // 这是必需的，因为在 Tauri 生产构建中动态 CSS 可能无法完全应用
-          const criticalStyle = document.createElement('style')
-          criticalStyle.textContent = `
-            /* KaTeX critical styles for production build */
-            .katex {
-              font-size: 1em;
-              text-indent: 0;
-              text-rendering: auto;
-            }
-            .katex svg {
-              display: inline-block;
-              position: relative;
-              width: 100%;
-              height: 100%;
-            }
-            .katex svg path {
-              fill: currentColor;
-            }
-            .katex .hide-tail {
-              overflow: hidden;
-            }
-            .md-math-inline .katex {
-              display: inline-block;
-            }
-            .md-math-block .katex {
-              display: block;
-              text-align: center;
-            }
-          `
-          document.head.appendChild(criticalStyle)
+          // 手动注入关键 CSS 兜底：限定在预览区，避免污染所见模式
+          ensureKatexCriticalStyle()
         }
 
         // 渲染每个数学节点
@@ -6665,6 +6675,33 @@ async function exportCurrentDocToPdf(target: string): Promise<void> {
   await writeFile(out as any, bytes as any)
   status.textContent = '已导出'
   setTimeout(() => refreshStatus(), 2000)
+}
+
+// 打印：始终按阅读模式渲染（不打印 UI/通知）
+async function printCurrentDoc(): Promise<void> {
+  try {
+    status.textContent = '正在准备打印...'
+  } catch {}
+  try {
+    await renderPreview({ forPrint: true })
+    const el = preview.querySelector('.preview-body') as HTMLElement | null
+    if (!el) throw new Error('未找到预览内容容器')
+    const { printElement } = await import('./core/print')
+    const title = (() => {
+      try {
+        const p = String(currentFilePath || '').trim()
+        if (!p) return document.title || '打印'
+        return p.split(/[\\/]+/).pop() || p
+      } catch {
+        return document.title || '打印'
+      }
+    })()
+    await printElement(el, { title })
+    try { status.textContent = '已打开打印' } catch {}
+    setTimeout(() => refreshStatus(), 2000)
+  } catch (e) {
+    showError('打印失败', e)
+  }
 }
 
 // 另存为
@@ -11166,6 +11203,16 @@ function bindEvents() {
         }
       }
     } catch {}
+    // Ctrl/Cmd+P：打印（移动端不拦截默认行为）
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'p') {
+      const isMobileUi = document.body.classList.contains('platform-mobile') || document.body.classList.contains('platform-android')
+      if (isMobileUi) return
+      e.preventDefault()
+      try { e.stopPropagation(); /* 防止编辑器内部再次处理 */ } catch {}
+      try { (e as any).stopImmediatePropagation && (e as any).stopImmediatePropagation() } catch {}
+      await printCurrentDoc()
+      return
+    }
     // 记录最近一次 Ctrl/Cmd(+Shift)+V 组合键（仅在编辑器/所见模式聚焦时生效，用于区分普通粘贴与纯文本粘贴）
     try {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {

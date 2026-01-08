@@ -3,6 +3,7 @@ import { $view } from '@milkdown/utils'
 import { mathInlineSchema, mathBlockSchema } from '@milkdown/plugin-math'
 import type { Node } from '@milkdown/prose/model'
 import type { EditorView, NodeView } from '@milkdown/prose/view'
+import { normalizeKatexLatexForInline } from '../../../utils/katexNormalize'
 
 // Math Inline NodeView
 class MathInlineNodeView implements NodeView {
@@ -43,14 +44,17 @@ class MathInlineNodeView implements NodeView {
   private async renderMath() {
     try {
       const code = this.node.textContent || ''
-      const value = this.node.attrs.value || code
+      const valueRaw = this.node.attrs.value || code
+      const value = normalizeKatexLatexForInline(valueRaw)
 
       // 将原始公式内容同步到 DOM 属性，供外层编辑逻辑安全读取
-      try { (this.dom as HTMLElement).dataset.value = value } catch {}
+      try { (this.dom as HTMLElement).dataset.value = valueRaw } catch {}
 
       // 动态导入 KaTeX 及其 CSS（CSS 只会加载一次，用于隐藏 .katex-mathml）
       const [katex] = await Promise.all([
         import('katex'),
+        // 启用 mhchem：支持 \ce{...} / \pu{...} 等化学公式宏
+        import('katex/contrib/mhchem'),
         import('katex/dist/katex.min.css')
       ])
 
@@ -125,14 +129,17 @@ class MathBlockNodeView implements NodeView {
 
   private async renderMath() {
     try {
-      const value = this.node.attrs.value || this.node.textContent || ''
+      const valueRaw = this.node.attrs.value || this.node.textContent || ''
+      const value = normalizeKatexLatexForInline(valueRaw)
 
       // 将原始公式内容同步到 DOM 属性，供外层编辑逻辑安全读取
-      try { (this.dom as HTMLElement).dataset.value = value } catch {}
+      try { (this.dom as HTMLElement).dataset.value = valueRaw } catch {}
 
       // 动态导入 KaTeX 及其 CSS（CSS 只会加载一次，用于隐藏 .katex-mathml）
       const [katex] = await Promise.all([
         import('katex'),
+        // 启用 mhchem：支持 \ce{...} / \pu{...} 等化学公式宏
+        import('katex/contrib/mhchem'),
         import('katex/dist/katex.min.css')
       ])
 
