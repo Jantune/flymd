@@ -108,32 +108,33 @@ function bindPullDownCommandPalette(): void {
     if (_pullDownPaletteBound) return
     _pullDownPaletteBound = true
 
+    const START_ZONE_BELOW_TITLEBAR_PX = 26
     let tracking = false
     let startX = 0
     let startY = 0
     let startedAt = 0
     let startTarget: EventTarget | null = null
+    let startZone: 'titlebar' | 'below' | null = null
     let lastOpenAt = 0
 
     const isInteractiveTarget = (target: EventTarget | null): boolean => {
       try {
         const el = target as HTMLElement | null
         if (!el) return false
-        if (el.closest('button, a, input, textarea, select, [contenteditable=\"true\"], .menu-item, .menubar, .titlebar')) return true
+        if (el.closest('button, a, input, textarea, select, [contenteditable=\"true\"], .menu-item, .menubar')) return true
         return false
       } catch {
         return false
       }
     }
 
-    const getTitlebarBottom = (): number => {
+    const getTitlebarRect = (): DOMRect | null => {
       try {
         const t = document.querySelector('.titlebar') as HTMLElement | null
-        if (!t) return 0
-        const r = t.getBoundingClientRect()
-        return r.bottom || 0
+        if (!t) return null
+        return t.getBoundingClientRect()
       } catch {
-        return 0
+        return null
       }
     }
 
@@ -176,8 +177,20 @@ function bindPullDownCommandPalette(): void {
 
         const t = ev.touches[0]
         const y = t?.clientY ?? 0
-        const titlebarBottom = getTitlebarBottom()
-        if (y <= titlebarBottom + 2) return
+        const rect = getTitlebarRect()
+        const titlebarTop = rect?.top ?? 0
+        const titlebarBottom = rect?.bottom ?? 0
+        const titlebarEl = (ev.target as HTMLElement | null)?.closest?.('.titlebar') as HTMLElement | null
+
+        // 仅允许从“标题栏”或“标题栏下方一小段区域”开始下滑，避免和内容滚动抢手势
+        if (y < titlebarTop) return
+        if (y <= titlebarBottom) {
+          if (!titlebarEl) return
+          startZone = 'titlebar'
+        } else {
+          if (y > titlebarBottom + START_ZONE_BELOW_TITLEBAR_PX) return
+          startZone = 'below'
+        }
 
         tracking = true
         startedAt = Date.now()
@@ -194,7 +207,11 @@ function bindPullDownCommandPalette(): void {
         if (!isMobile()) return
         if (isCommandPaletteOpen()) return
         if (ev.changedTouches?.length !== 1) return
-        if (!isScrollAtTop(startTarget)) return
+
+        // 从“标题栏下方区域”触发时，必须确保内容已滚动到顶；否则就是在破坏正常滚动
+        if (startZone !== 'titlebar') {
+          if (!isScrollAtTop(startTarget)) return
+        }
 
         const t = ev.changedTouches[0]
         const endX = t?.clientX ?? 0
