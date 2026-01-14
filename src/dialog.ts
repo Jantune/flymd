@@ -983,14 +983,15 @@ export function showFormDialog(opts: {
       closeDialog(out)
     }
 
-    buttonsContainer.appendChild(cancelBtn)
-    buttonsContainer.appendChild(submitBtn)
-
     box.appendChild(titleEl)
     box.appendChild(messageEl)
     box.appendChild(errorEl)
     box.appendChild(formEl)
-    box.appendChild(buttonsContainer)
+
+    // 把按钮放进 form 内，否则 type="submit" 在某些环境下不会触发表单提交
+    buttonsContainer.appendChild(cancelBtn)
+    buttonsContainer.appendChild(submitBtn)
+    formEl.appendChild(buttonsContainer)
     overlay.appendChild(box)
     document.body.appendChild(overlay)
 
