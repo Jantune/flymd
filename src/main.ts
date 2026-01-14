@@ -7550,29 +7550,15 @@ async function getUploaderRawConfig(): Promise<AnyUploaderConfig | null> {
 }
 
 // 图床配置读取（允许 enabled=false 的情况）：用于“手动插入图片”这种显式动作
-async function getUploaderConfigAllowDisabled(): Promise<UploaderConfig | null> {
+// 关键点：这里不应该只支持 S3/R2，否则 ImgLa（Lsky Pro+）在移动端会永远走不到上传路径。
+async function getUploaderConfigAllowDisabled(): Promise<AnyUploaderConfig | null> {
   try {
     if (!store) return null
     const up = await store.get('uploader')
-    if (!up || typeof up !== 'object') return null
-    const o = up as any
-    const cfg: UploaderConfig = {
-      enabled: true,
-      accessKeyId: String(o.accessKeyId || ''),
-      secretAccessKey: String(o.secretAccessKey || ''),
-      bucket: String(o.bucket || ''),
-      region: typeof o.region === 'string' ? o.region : undefined,
-      endpoint: typeof o.endpoint === 'string' ? o.endpoint : undefined,
-      customDomain: typeof o.customDomain === 'string' ? o.customDomain : undefined,
-      keyTemplate: typeof o.keyTemplate === 'string' ? o.keyTemplate : '{year}/{month}{fileName}{md5}.{extName}',
-      aclPublicRead: o.aclPublicRead !== false,
-      forcePathStyle: o.forcePathStyle !== false,
-      convertToWebp: !!o.convertToWebp,
-      webpQuality: (typeof o.webpQuality === 'number' ? o.webpQuality : 0.85),
-      saveLocalAsWebp: !!o.saveLocalAsWebp,
-    }
-    if (!cfg.accessKeyId || !cfg.secretAccessKey || !cfg.bucket) return null
-    return cfg
+    const cfg = parseUploaderConfigForManagement(up as any, { enabledOnly: false })
+    if (!cfg) return null
+    // 手动插入属于显式动作：只要必填项齐全，就强制视为启用上传。
+    return { ...cfg, enabled: true }
   } catch { return null }
 }
 
