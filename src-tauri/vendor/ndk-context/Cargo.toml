@@ -1,0 +1,10 @@
+[package]
+name = "ndk-context"
+version = "0.1.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Handles for accessing Android APIs"
+repository = "https://github.com/rust-windowing/android-ndk-rs"
+
+[lib]
+path = "src/lib.rs"

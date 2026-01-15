@@ -56,3 +56,8 @@ codegen-units = 1
 opt-level = "z"
 lto = true
 strip = true
+
+[patch.crates-io]
+# 修复：部分设备/系统会触发 Android 运行时“重复初始化”路径，导致 ndk-context 断言 abort。
+# 用本地补丁把初始化/释放改成幂等，避免直接崩溃（详见 src-tauri/vendor/ndk-context）。
+ndk-context = { path = "vendor/ndk-context" }
