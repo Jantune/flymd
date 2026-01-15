@@ -310,12 +310,12 @@ body.platform-mobile .upl-overlay {
 }
 
 body.platform-mobile .upl-dialog {
-  width: calc(100vw - 16px) !important;
+  width: calc(100vw - 32px) !important;
   max-width: none !important;
   /* 先用 vh 兜底；支持 dvh 的再覆盖 */
   height:
     calc(
-      100vh - 16px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
+      100vh - 32px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
         var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
     ) !important;
   max-height: none !important;
@@ -326,7 +326,7 @@ body.platform-mobile .upl-dialog {
   body.platform-mobile .upl-dialog {
     height:
       calc(
-        100dvh - 16px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
+        100dvh - 32px - var(--flymd-safe-area-inset-top, env(safe-area-inset-top, 0px)) -
           var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
       ) !important;
   }
