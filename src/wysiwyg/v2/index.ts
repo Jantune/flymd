@@ -2166,6 +2166,28 @@ export async function wysiwygV2ToggleBulletList() {
   })
 }
 
+export async function wysiwygV2ToggleOrderedList() {
+  if (!_editor) return
+  const { wrapInOrderedListCommand } = await import('@milkdown/preset-commonmark')
+  await _editor.action((ctx) => {
+    const commands = ctx.get(commandsCtx)
+    const view = ctx.get(editorViewCtx)
+    const { state } = view
+    const hadRange = !state.selection.empty
+    commands.call((wrapInOrderedListCommand as any).key)
+    if (hadRange) {
+      try {
+        const st2 = view.state
+        const pos = st2.selection.to >>> 0
+        const safePos = Math.max(0, Math.min(st2.doc.content.size, pos))
+        let tr = st2.tr.setSelection(TextSelection.create(st2.doc, safePos))
+        try { (tr as any).setStoredMarks([]) } catch {}
+        view.dispatch(tr.scrollIntoView())
+      } catch {}
+    }
+  })
+}
+
 export async function wysiwygV2InsertImage(src: string, alt?: string) {
   if (!_editor) return
   const u = String(src || '').trim()

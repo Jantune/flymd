@@ -72,6 +72,8 @@ const state = {
   context: null,
   prefs: { ...defaultPrefs },
   toolbarEl: null,
+  headingMenuEl: null,
+  headingMenuOutside: null,
   dragging: false,
   dragStartX: 0,
   dragStartY: 0,
@@ -82,6 +84,12 @@ const state = {
 };
 
 const COMMANDS = [
+  {
+    id: 'heading-menu',
+    label: 'H',
+    title: ftText('标题', 'Heading'),
+    run: (_ctx, anchorBtn) => openHeadingMenu(anchorBtn)
+  },
   {
     id: 'h1',
     label: 'H1',
@@ -131,6 +139,12 @@ const COMMANDS = [
     run: (ctx) => applyItalic(ctx)
   },
   {
+    id: 'ol',
+    label: '1.',
+    title: ftText('有序列表', 'Ordered list'),
+    run: (ctx) => applyOrderedList(ctx)
+  },
+  {
     id: 'ul',
     label: '•',
     title: ftText('无序列表', 'Bullet list'),
@@ -149,6 +163,9 @@ const COMMANDS = [
     run: (ctx) => applyImage(ctx)
   }
 ];
+
+// 工具条展示用：别把 H1~H6 这种按钮堆一排，移动端/小屏会被挤爆
+const TOOLBAR_BUTTON_IDS = ['heading-menu', 'bold', 'italic', 'ol', 'ul', 'link', 'image'];
 
 async function loadPrefs(context) {
   try {
@@ -267,14 +284,9 @@ function createToolbarIfNeeded() {
   bar.style.userSelect = 'none';
   bar.style.cursor = 'move';
 
-  const title = document.createElement('span');
-  title.textContent = ftText('富文本', 'Toolbar');
-  title.style.fontSize = '12px';
-  title.style.opacity = '0.8';
-  title.style.marginRight = '4px';
-  bar.appendChild(title);
-
-  COMMANDS.forEach((cmd) => {
+  TOOLBAR_BUTTON_IDS.forEach((id) => {
+    const cmd = COMMANDS.find((c) => c.id === id);
+    if (!cmd) return;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.textContent = cmd.label;
@@ -294,7 +306,7 @@ function createToolbarIfNeeded() {
 
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      runCommandById(cmd.id);
+      runCommandById(cmd.id, btn);
     });
 
     btn.addEventListener('mouseenter', () => {
@@ -317,6 +329,7 @@ function showToolbar() {
   if (state.toolbarEl) {
     // 阅读模式永远隐藏
     if (isReadingModeDom()) {
+      closeHeadingMenu();
       state.toolbarEl.style.display = 'none';
       return;
     }
@@ -326,7 +339,109 @@ function showToolbar() {
 
 function hideToolbar() {
   if (state.toolbarEl) {
+    closeHeadingMenu();
     state.toolbarEl.style.display = 'none';
+  }
+}
+
+// 标题二级菜单：小屏别堆 H1~H6 按钮，浪费空间
+function closeHeadingMenu() {
+  const el = state.headingMenuEl;
+  if (!el) return;
+  try { el.remove(); } catch {}
+  state.headingMenuEl = null;
+  if (state.headingMenuOutside) {
+    try { document.removeEventListener('mousedown', state.headingMenuOutside, true); } catch {}
+    try { document.removeEventListener('touchstart', state.headingMenuOutside, true); } catch {}
+    state.headingMenuOutside = null;
+  }
+}
+
+function openHeadingMenu(anchorBtn) {
+  try {
+    if (!anchorBtn) return;
+    if (state.headingMenuEl) { closeHeadingMenu(); return; }
+
+    const menu = document.createElement('div');
+    menu.style.position = 'fixed';
+    menu.style.zIndex = '10000';
+    menu.style.display = 'flex';
+    menu.style.flexDirection = 'column';
+    menu.style.gap = '4px';
+    menu.style.padding = '6px';
+    menu.style.borderRadius = '8px';
+    menu.style.background = 'rgba(30, 30, 30, 0.95)';
+    menu.style.boxShadow = '0 4px 12px rgba(0,0,0,0.35)';
+    menu.style.userSelect = 'none';
+    menu.style.maxWidth = 'min(80vw, 220px)';
+    menu.style.boxSizing = 'border-box';
+
+    const addItem = (label, title, onClick) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      b.title = title || label;
+      b.style.border = 'none';
+      b.style.padding = '6px 10px';
+      b.style.margin = '0';
+      b.style.borderRadius = '6px';
+      b.style.background = '#444';
+      b.style.color = '#fff';
+      b.style.cursor = 'pointer';
+      b.style.fontSize = '13px';
+      b.style.lineHeight = '1.2';
+      b.style.textAlign = 'left';
+      b.addEventListener('click', (e) => {
+        try { e.stopPropagation(); } catch {}
+        closeHeadingMenu();
+        try { onClick && onClick(); } catch {}
+      });
+      b.addEventListener('mouseenter', () => { b.style.background = '#666'; });
+      b.addEventListener('mouseleave', () => { b.style.background = '#444'; });
+      menu.appendChild(b);
+    };
+
+    for (let i = 1; i <= 6; i++) {
+      const id = 'h' + i;
+      addItem('H' + i, ftText(i + '级标题', 'Heading ' + i), () => runCommandById(id));
+    }
+
+    document.body.appendChild(menu);
+    state.headingMenuEl = menu;
+
+    const rect = anchorBtn.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const vw = (vv && vv.width) ? vv.width : window.innerWidth;
+    const vh = (vv && vv.height) ? vv.height : window.innerHeight;
+    const mr = menu.getBoundingClientRect();
+    const margin = 6;
+
+    let left = rect.left;
+    let top = rect.bottom + margin;
+
+    if (left + mr.width + 8 > vw) left = Math.max(8, vw - mr.width - 8);
+    if (left < 8) left = 8;
+
+    if (top + mr.height + 8 > vh && rect.top - mr.height - margin >= 8) {
+      top = rect.top - mr.height - margin;
+    }
+    if (top < 8) top = 8;
+
+    menu.style.left = left + 'px';
+    menu.style.top = top + 'px';
+
+    state.headingMenuOutside = (e) => {
+      const t = e && e.target ? e.target : null;
+      if (!t) return;
+      if (menu.contains(t)) return;
+      if (anchorBtn.contains(t)) return;
+      closeHeadingMenu();
+    };
+
+    try { document.addEventListener('mousedown', state.headingMenuOutside, true); } catch {}
+    try { document.addEventListener('touchstart', state.headingMenuOutside, true); } catch {}
+  } catch {
+    closeHeadingMenu();
   }
 }
 
@@ -564,13 +679,13 @@ function snapToTop(bar) {
   }
 }
 
-function runCommandById(id) {
+function runCommandById(id, arg) {
   const ctx = state.context;
   if (!ctx) return;
   const cmd = COMMANDS.find((c) => c.id === id);
   if (!cmd || typeof cmd.run !== 'function') return;
   try {
-    cmd.run(ctx);
+    cmd.run(ctx, arg);
   } catch (e) {
     ctx.ui.notice('工具条执行失败: ' + (e && e.message ? e.message : String(e)), 'err');
   }
@@ -747,6 +862,36 @@ function applyItalic(context) {
     context.setEditorValue(next);
   } catch (e) {
     context.ui.notice('斜体失败: ' + (e && e.message ? e.message : String(e)), 'err');
+  }
+}
+
+function applyOrderedList(context) {
+  try {
+    const { doc, start, end, hasSelection } = getSelectionRange(context);
+    if (!hasSelection) {
+      context.ui.notice('请先选中要转换为列表的内容', 'err');
+      return;
+    }
+
+    const before = doc.slice(0, start);
+    const body = doc.slice(start, end);
+    const after = doc.slice(end);
+
+    const lines = body.split('\n');
+    const trimmedLines = lines.map((l) => l.replace(/^\s+/, ''));
+    const allMarked = trimmedLines.every((l) => !l || /^\d+\.\s+/.test(l));
+
+    let idx = 1;
+    const nextLines = trimmedLines.map((l) => {
+      if (!l) return l;
+      if (allMarked) return l.replace(/^\d+\.\s+/, '');
+      return (idx++) + '. ' + l;
+    });
+
+    const nextDoc = before + nextLines.join('\n') + after;
+    context.setEditorValue(nextDoc);
+  } catch (e) {
+    context.ui.notice('列表转换失败: ' + (e && e.message ? e.message : String(e)), 'err');
   }
 }
 

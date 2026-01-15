@@ -21,6 +21,7 @@ export type BuiltInFloatingToolbarDeps = {
     toggleBold?: () => void | Promise<void>
     toggleItalic?: () => void | Promise<void>
     toggleBulletList?: () => void | Promise<void>
+    toggleOrderedList?: () => void | Promise<void>
     applyLink?: (url: string, label: string) => void | Promise<void>
     insertImage?: (src: string, alt?: string) => void | Promise<void>
     getSelectedText?: () => string
@@ -233,6 +234,7 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
 
   const state = {
     toolbarEl: null as HTMLDivElement | null,
+    headingMenuEl: null as HTMLDivElement | null,
     raf: 0 as number,
     lastSourceSel: null as SourceSelection | null,
     dragging: false as boolean,
@@ -240,6 +242,109 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     dragStartY: 0 as number,
     barStartLeft: 0 as number,
     barStartTop: 0 as number,
+  }
+
+  // 标题二级菜单：移动端空间宝贵，别把 H1~H6 这种按钮堆一排
+  let headingMenuOutside: ((e: Event) => void) | null = null
+  const closeHeadingMenu = () => {
+    const el = state.headingMenuEl
+    if (!el) return
+    try { el.remove() } catch {}
+    state.headingMenuEl = null
+    if (headingMenuOutside) {
+      try { document.removeEventListener('mousedown', headingMenuOutside, true) } catch {}
+      try { document.removeEventListener('touchstart', headingMenuOutside, true) } catch {}
+      headingMenuOutside = null
+    }
+  }
+
+  const openHeadingMenu = (anchorBtn: HTMLButtonElement) => {
+    try {
+      if (state.headingMenuEl) { closeHeadingMenu(); return }
+
+      const menu = document.createElement('div')
+      menu.style.position = 'fixed'
+      // 高于工具条本体
+      menu.style.zIndex = '10000'
+      menu.style.display = 'flex'
+      menu.style.flexDirection = 'column'
+      menu.style.gap = '4px'
+      menu.style.padding = '6px'
+      menu.style.borderRadius = '8px'
+      menu.style.background = 'rgba(30, 30, 30, 0.95)'
+      menu.style.boxShadow = '0 4px 12px rgba(0,0,0,0.35)'
+      menu.style.userSelect = 'none'
+      menu.style.maxWidth = 'min(80vw, 220px)'
+      menu.style.boxSizing = 'border-box'
+
+      const addItem = (label: string, title: string, onClick: () => void) => {
+        const b = document.createElement('button')
+        b.type = 'button'
+        b.textContent = label
+        b.title = title || label
+        b.style.border = 'none'
+        b.style.padding = '6px 10px'
+        b.style.margin = '0'
+        b.style.borderRadius = '6px'
+        b.style.background = '#444'
+        b.style.color = '#fff'
+        b.style.cursor = 'pointer'
+        b.style.fontSize = '13px'
+        b.style.lineHeight = '1.2'
+        b.style.textAlign = 'left'
+        b.style.touchAction = 'manipulation'
+        b.addEventListener('click', (e) => {
+          try { e.stopPropagation() } catch {}
+          closeHeadingMenu()
+          onClick()
+        })
+        try {
+          b.addEventListener('mouseenter', () => { b.style.background = '#666' })
+          b.addEventListener('mouseleave', () => { b.style.background = '#444' })
+        } catch {}
+        menu.appendChild(b)
+      }
+
+      for (let i = 1; i <= 6; i++) {
+        const lv = i
+        addItem(`H${lv}`, ftText(`${lv}级标题`, `Heading ${lv}`), () => { void applyHeading(lv) })
+      }
+
+      document.body.appendChild(menu)
+      state.headingMenuEl = menu
+
+      const rect = anchorBtn.getBoundingClientRect()
+      const { w: vw, h: vh } = getViewportSize()
+      const mr = menu.getBoundingClientRect()
+      const margin = 6
+
+      let left = rect.left
+      let top = rect.bottom + margin
+
+      if (left + mr.width + 8 > vw) left = Math.max(8, vw - mr.width - 8)
+      if (left < 8) left = 8
+
+      if (top + mr.height + 8 > vh && rect.top - mr.height - margin >= 8) {
+        top = rect.top - mr.height - margin
+      }
+      if (top < 8) top = 8
+
+      menu.style.left = `${left}px`
+      menu.style.top = `${top}px`
+
+      headingMenuOutside = (e: Event) => {
+        const t = (e as any).target as Node | null
+        if (!t) return
+        if (menu.contains(t)) return
+        if (anchorBtn.contains(t)) return
+        closeHeadingMenu()
+      }
+
+      try { document.addEventListener('mousedown', headingMenuOutside, true) } catch {}
+      try { document.addEventListener('touchstart', headingMenuOutside, true) } catch {}
+    } catch {
+      closeHeadingMenu()
+    }
   }
 
   const enabled = () => {
@@ -344,27 +449,16 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     bar.style.flexWrap = 'wrap'
     bar.style.boxSizing = 'border-box'
 
-    const title = document.createElement('span')
-    title.textContent = ftText('富文本', 'Toolbar')
-    title.style.fontSize = '12px'
-    title.style.opacity = '0.8'
-    title.style.marginRight = '4px'
-    bar.appendChild(title)
-
-    type Command = { id: string; label: string; title: string; run: () => void | Promise<void> }
+    type Command = { id: string; label: string; title: string; run: (btn: HTMLButtonElement) => void | Promise<void> }
     const commands: Command[] = [
-      { id: 'h1', label: 'H1', title: ftText('一级标题', 'Heading 1'), run: () => applyHeading(1) },
-      { id: 'h2', label: 'H2', title: ftText('二级标题', 'Heading 2'), run: () => applyHeading(2) },
-      { id: 'h3', label: 'H3', title: ftText('三级标题', 'Heading 3'), run: () => applyHeading(3) },
-      { id: 'h4', label: 'H4', title: ftText('四级标题', 'Heading 4'), run: () => applyHeading(4) },
-      { id: 'h5', label: 'H5', title: ftText('五级标题', 'Heading 5'), run: () => applyHeading(5) },
-      { id: 'h6', label: 'H6', title: ftText('六级标题', 'Heading 6'), run: () => applyHeading(6) },
-      { id: 'bold', label: 'B', title: ftText('加粗', 'Bold'), run: () => applyBold() },
-      { id: 'italic', label: 'I', title: ftText('斜体', 'Italic'), run: () => applyItalic() },
-      { id: 'ul', label: '•', title: ftText('无序列表', 'Bullet list'), run: () => applyBulletList() },
-      { id: 'link', label: '🔗', title: ftText('插入链接', 'Insert link'), run: () => applyLink() },
-      { id: 'image', label: 'IMG', title: ftText('插入图片', 'Insert image'), run: () => applyImage() },
-      { id: 'more', label: '⋯', title: ftText('更多功能', 'More'), run: () => openContextMenu() },
+      { id: 'heading', label: 'H', title: ftText('标题', 'Heading'), run: (btn) => openHeadingMenu(btn) },
+      { id: 'bold', label: 'B', title: ftText('加粗', 'Bold'), run: (_btn) => applyBold() },
+      { id: 'italic', label: 'I', title: ftText('斜体', 'Italic'), run: (_btn) => applyItalic() },
+      { id: 'ol', label: '1.', title: ftText('有序列表', 'Ordered list'), run: (_btn) => applyOrderedList() },
+      { id: 'ul', label: '•', title: ftText('无序列表', 'Bullet list'), run: (_btn) => applyBulletList() },
+      { id: 'link', label: '🔗', title: ftText('插入链接', 'Insert link'), run: (_btn) => applyLink() },
+      { id: 'image', label: 'IMG', title: ftText('插入图片', 'Insert image'), run: (_btn) => applyImage() },
+      { id: 'more', label: '⋯', title: ftText('更多功能', 'More'), run: (_btn) => openContextMenu() },
     ]
 
     commands.forEach((cmd) => {
@@ -404,7 +498,7 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
         try { e.stopPropagation() } catch {}
         if (pressedSel) state.lastSourceSel = pressedSel
         pressedSel = null
-        void cmd.run()
+        void cmd.run(btn)
       })
 
       try {
@@ -427,6 +521,7 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     const bar = state.toolbarEl
     if (!bar) return
     if (isReadingMode()) {
+      try { closeHeadingMenu() } catch {}
       bar.style.display = 'none'
       return
     }
@@ -436,6 +531,7 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
   const hideToolbar = () => {
     const bar = state.toolbarEl
     if (!bar) return
+    try { closeHeadingMenu() } catch {}
     bar.style.display = 'none'
   }
 
@@ -616,6 +712,39 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
 
       const nextDoc = before + nextLines.join('\n') + after
       deps.setDoc(nextDoc)
+    } catch (e) {
+      deps.notice(ftText('列表转换失败: ', 'List failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
+    }
+  }
+
+  const applyOrderedList = async () => {
+    if (deps.isWysiwygActive()) {
+      const fn = deps.wysiwyg?.toggleOrderedList
+      if (typeof fn === 'function') { await fn(); return }
+      deps.notice(ftText('所见模式暂不支持列表命令', 'List not supported in WYSIWYG'), 'err', 1600)
+      return
+    }
+    try {
+      const { doc, start, end, hasSelection } = getSourceSelectionRange()
+      if (!hasSelection) { deps.notice(ftText('请先选中要转换为列表的内容', 'Select text first'), 'err', 1400); return }
+
+      const before = doc.slice(0, start)
+      const body = doc.slice(start, end)
+      const after = doc.slice(end)
+
+      const lines = body.split('\n')
+      const trimmedLines = lines.map((l) => l.replace(/^\s+/, ''))
+      const allMarked = trimmedLines.every((l) => !l || /^\d+\.\s+/.test(l))
+
+      let idx = 1
+      const nextLines = trimmedLines.map((l) => {
+        if (!l) return l
+        if (allMarked) return l.replace(/^\d+\.\s+/, '')
+        const n = idx++
+        return `${n}. ${l}`
+      })
+
+      deps.setDoc(before + nextLines.join('\n') + after)
     } catch (e) {
       deps.notice(ftText('列表转换失败: ', 'List failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
     }

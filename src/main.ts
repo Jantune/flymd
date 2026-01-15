@@ -15,7 +15,7 @@ import { t, fmtStatus, getLocalePref, setLocalePref, getLocale, tLocale } from '
 import type MarkdownIt from 'markdown-it'
 import type { LocalePref } from './i18n'
 // WYSIWYG: 锚点插件与锚点同步（用于替换纯比例同步）
-import { enableWysiwygV2, disableWysiwygV2, wysiwygV2ToggleBold, wysiwygV2ToggleItalic, wysiwygV2ApplyLink, wysiwygV2InsertImage, wysiwygV2ToggleBulletList, wysiwygV2ApplyHeading, wysiwygV2GetSelectedText, wysiwygV2FindNext, wysiwygV2FindPrev, wysiwygV2ReplaceOne as wysiwygV2ReplaceOneSel, wysiwygV2ReplaceAllInDoc, wysiwygV2ReplaceAll } from './wysiwyg/v2/index'
+import { enableWysiwygV2, disableWysiwygV2, wysiwygV2ToggleBold, wysiwygV2ToggleItalic, wysiwygV2ApplyLink, wysiwygV2InsertImage, wysiwygV2ToggleBulletList, wysiwygV2ToggleOrderedList, wysiwygV2ApplyHeading, wysiwygV2GetSelectedText, wysiwygV2FindNext, wysiwygV2FindPrev, wysiwygV2ReplaceOne as wysiwygV2ReplaceOneSel, wysiwygV2ReplaceAllInDoc, wysiwygV2ReplaceAll } from './wysiwyg/v2/index'
 // Tauri 插件（v2）
 // Tauri 对话框：使用 ask 提供原生确认，避免浏览器 confirm 在关闭事件中失效
 import { open, save, ask } from '@tauri-apps/plugin-dialog'
@@ -10115,6 +10115,7 @@ function bindEvents() {
         toggleBold: () => wysiwygV2ToggleBold(),
         toggleItalic: () => wysiwygV2ToggleItalic(),
         toggleBulletList: () => wysiwygV2ToggleBulletList(),
+        toggleOrderedList: () => wysiwygV2ToggleOrderedList(),
         applyLink: (url, label) => wysiwygV2ApplyLink(url, label),
         insertImage: (src, alt) => wysiwygV2InsertImage(src, alt),
         getSelectedText: () => {
