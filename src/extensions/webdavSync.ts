@@ -738,6 +738,11 @@ async function showSyncLogOverlay(): Promise<void> {
   btnCopy.textContent = '复制'
   actions.appendChild(btnCopy)
 
+  const btnClear = document.createElement('button')
+  btnClear.className = 'btn'
+  btnClear.textContent = t('sync.clearlog')
+  actions.appendChild(btnClear)
+
   const btnClose = document.createElement('button')
   btnClose.className = 'btn'
   btnClose.textContent = '关闭'
@@ -781,6 +786,26 @@ async function showSyncLogOverlay(): Promise<void> {
       document.execCommand('copy')
       ta.remove()
     } catch {}
+  })
+
+  btnClear.addEventListener('click', async () => {
+    try {
+      const logPath = 'flymd-sync.log'
+      const logHandle = await openFileHandle(logPath as any, {
+        write: true,
+        truncate: true,
+        create: true,
+        baseDir: BaseDirectory.AppLocalData
+      } as any)
+      try {
+        await (logHandle as any).write(new TextEncoder().encode(''))
+      } finally {
+        try { await (logHandle as any).close() } catch {}
+      }
+      await load()
+    } catch (e) {
+      console.warn('清空日志失败', e)
+    }
   })
 
   const close = () => removeSyncLogOverlay()
