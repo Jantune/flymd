@@ -807,3 +807,14 @@ body.platform-mobile ::-webkit-scrollbar-thumb {
 body.dark-mode.platform-mobile ::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.25) !important;
 }
+
+/* ========== 移动端：内置悬浮工具条（始终显示模式） ========== */
+body.platform-mobile #flymd-floating-toolbar-builtin.always-show-mode {
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  right: auto !important;
+  top: auto !important;
+  transition: bottom 0.2s ease;
+  max-width: calc(100vw - 32px) !important;
+  box-sizing: border-box !important;
+}

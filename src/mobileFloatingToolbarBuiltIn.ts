@@ -252,22 +252,30 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     longPressTimer: 0 as any,
     longPressStartX: 0 as number,
     longPressStartY: 0 as number,
+    // 始终显示模式
+    alwaysShowMode: false as boolean,
+    keyboardHeight: 0 as number,
   }
 
-  type ToolbarPrefs = { order: string[]; hidden: string[] }
+  type ToolbarPrefs = {
+    order: string[]
+    hidden: string[]
+    alwaysShow?: boolean  // 是否始终显示工具条
+  }
   const loadToolbarPrefs = (defaults: string[]): ToolbarPrefs => {
     try {
       const raw = localStorage.getItem(TOOLBAR_PREF_KEY)
-      if (!raw) return { order: defaults.slice(), hidden: [] }
+      if (!raw) return { order: defaults.slice(), hidden: [], alwaysShow: false }
       const parsed = JSON.parse(raw) as Partial<ToolbarPrefs> | null
       const order = Array.isArray(parsed?.order) ? parsed!.order!.filter((x) => typeof x === 'string') : []
       const hidden = Array.isArray(parsed?.hidden) ? parsed!.hidden!.filter((x) => typeof x === 'string') : []
+      const alwaysShow = !!parsed?.alwaysShow
       const orderSet = new Set(order)
-      // 确保新命令不会“永远不出现”
+      // 确保新命令不会"永远不出现"
       const mergedOrder = order.concat(defaults.filter((id) => !orderSet.has(id)))
-      return { order: mergedOrder, hidden }
+      return { order: mergedOrder, hidden, alwaysShow }
     } catch {
-      return { order: defaults.slice(), hidden: [] }
+      return { order: defaults.slice(), hidden: [], alwaysShow: false }
     }
   }
 
@@ -471,6 +479,10 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       if (e.button !== 0) return
       const bar = state.toolbarEl
       if (!bar) return
+
+      // 始终显示模式下禁用拖动
+      if (state.alwaysShowMode) return
+
       state.dragging = true
       const rect = bar.getBoundingClientRect()
       state.dragStartX = e.clientX
@@ -700,6 +712,30 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       state.raf = 0
       if (!enabled()) { try { hideToolbar() } catch {} ; return }
       if (isReadingMode()) { try { hideToolbar() } catch {} ; return }
+
+      // ========== 始终显示模式逻辑 ==========
+      const prefs = loadToolbarPrefs(buildAllCommands().map(c => c.id))
+      if (prefs.alwaysShow) {
+        if (!state.alwaysShowMode) {
+          state.alwaysShowMode = true
+        }
+        const bar = ensureToolbar()
+        if (!bar) return
+
+        bar.style.left = '50%'
+        bar.style.transform = 'translateX(-50%)'
+        bar.style.right = ''
+        updateToolbarBottomForAlwaysShow()
+        showToolbar()
+        return  // 跳过常规选区跟随逻辑
+      } else {
+        if (state.alwaysShowMode) {
+          state.alwaysShowMode = false
+          state.keyboardHeight = 0
+        }
+      }
+      // ==========================================
+
       const hasSel = hasTextSelection()
       if (!hasSel && state.forceVisible) {
         // 长按后松手：允许保留一小段时间；超时后自动收起
@@ -1216,10 +1252,34 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     }
   }
 
+  // 始终显示模式：更新工具条底部位置（键盘适配）
+  const updateToolbarBottomForAlwaysShow = () => {
+    try {
+      const bar = state.toolbarEl
+      if (!bar || !state.alwaysShowMode) return
+
+      const vv = (window as any).visualViewport as VisualViewport | undefined
+      if (!vv) return
+
+      const kb = Math.max(0, Math.round(window.innerHeight - (vv.height + vv.offsetTop)))
+      state.keyboardHeight = kb
+
+      const bottom = kb > 80 ? (kb + 12) : 12
+      bar.style.bottom = `calc(var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + ${bottom}px)`
+      bar.style.top = ''
+      bar.style.left = '50%'
+      bar.style.transform = 'translateX(-50%)'
+      bar.style.right = ''
+    } catch {}
+  }
+
   const rebuildToolbar = () => {
     try { closeHeadingMenu() } catch {}
     try { state.toolbarEl?.remove() } catch {}
     state.toolbarEl = null
+    const prefs = loadToolbarPrefs(buildAllCommands().map(c => c.id))
+    state.alwaysShowMode = !!prefs.alwaysShow
+    state.keyboardHeight = 0
     try { updateToolbarVisibilityBySelection() } catch {}
   }
 
@@ -1234,12 +1294,12 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       const panel = document.createElement('div')
       panel.style.position = 'absolute'
       panel.style.left = '50%'
-      panel.style.bottom = '12px'
+      panel.style.bottom = 'calc(var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 12px)'
       panel.style.transform = 'translateX(-50%)'
       panel.style.background = '#fff'
       panel.style.borderRadius = '14px'
       panel.style.width = 'min(96vw, 520px)'
-      panel.style.maxHeight = '80vh'
+      panel.style.maxHeight = 'calc(80vh - var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) - 24px)'
       panel.style.overflow = 'auto'
       panel.style.boxShadow = '0 8px 24px rgba(0,0,0,0.18)'
       panel.style.fontSize = '14px'
@@ -1367,7 +1427,11 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       btnOk.style.background = '#2563eb'
       btnOk.style.color = '#fff'
       btnOk.onclick = () => {
-        const next: ToolbarPrefs = { order: prefs.order.slice(), hidden: Array.from(hidden).filter((id) => !pinned.has(id)) }
+        const next: ToolbarPrefs = {
+          order: prefs.order.slice(),
+          hidden: Array.from(hidden).filter((id) => !pinned.has(id)),
+          alwaysShow: alwaysShowChk.checked
+        }
         saveToolbarPrefs(next)
         try { overlay.remove() } catch {}
         rebuildToolbar()
@@ -1377,6 +1441,34 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       footer.appendChild(btnOk)
 
       panel.appendChild(header)
+
+      // 始终显示复选框
+      const alwaysShowSection = document.createElement('div')
+      alwaysShowSection.style.padding = '10px 16px'
+      alwaysShowSection.style.borderBottom = '1px solid #f2f2f2'
+      alwaysShowSection.style.display = 'flex'
+      alwaysShowSection.style.alignItems = 'center'
+      alwaysShowSection.style.gap = '8px'
+
+      const alwaysShowChk = document.createElement('input')
+      alwaysShowChk.type = 'checkbox'
+      alwaysShowChk.id = 'ft-always-show-chk'
+      alwaysShowChk.checked = !!prefs.alwaysShow
+
+      const alwaysShowLabel = document.createElement('label')
+      alwaysShowLabel.htmlFor = 'ft-always-show-chk'
+      alwaysShowLabel.style.flex = '1'
+      alwaysShowLabel.style.cursor = 'pointer'
+      alwaysShowLabel.textContent = ftText('始终显示工具条(固定在底部)', 'Always show toolbar (fixed at bottom)')
+
+      alwaysShowChk.onchange = () => {
+        prefs.alwaysShow = alwaysShowChk.checked
+      }
+
+      alwaysShowSection.appendChild(alwaysShowChk)
+      alwaysShowSection.appendChild(alwaysShowLabel)
+      panel.appendChild(alwaysShowSection)
+
       panel.appendChild(list)
       panel.appendChild(footer)
       overlay.appendChild(panel)
@@ -1448,7 +1540,14 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     try { window.addEventListener('resize', handler) } catch {}
     try {
       const vv = (window as any).visualViewport as VisualViewport | undefined
-      if (vv && typeof vv.addEventListener === 'function') vv.addEventListener('resize', handler)
+      if (vv && typeof vv.addEventListener === 'function') {
+        vv.addEventListener('resize', () => {
+          if (state.alwaysShowMode) {
+            updateToolbarBottomForAlwaysShow()
+          }
+          handler()
+        })
+      }
     } catch {}
 
     const ta = deps.getEditor()
