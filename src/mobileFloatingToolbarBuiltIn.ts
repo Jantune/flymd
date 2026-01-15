@@ -245,6 +245,8 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     barStartTop: 0 as number,
     // 移动端：长按时强制显示（即便系统尚未更新 selection）
     forceVisible: false as boolean,
+    // 强制显示的“保活”截止时间：用于长按后松手，给用户点击按钮的窗口
+    forceStickyUntil: 0 as number,
     forceAnchorX: 0 as number,
     forceAnchorY: 0 as number,
     longPressTimer: 0 as any,
@@ -698,7 +700,16 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       state.raf = 0
       if (!enabled()) { try { hideToolbar() } catch {} ; return }
       if (isReadingMode()) { try { hideToolbar() } catch {} ; return }
-      if (!hasTextSelection() && !state.forceVisible) { try { hideToolbar() } catch {} ; return }
+      const hasSel = hasTextSelection()
+      if (!hasSel && state.forceVisible) {
+        // 长按后松手：允许保留一小段时间；超时后自动收起
+        const now = Date.now()
+        if (state.forceStickyUntil > 0 && now > state.forceStickyUntil) {
+          state.forceVisible = false
+          state.forceStickyUntil = 0
+        }
+      }
+      if (!hasSel && !state.forceVisible) { try { hideToolbar() } catch {} ; return }
 
       const bar = ensureToolbar()
       if (!bar) return
@@ -1424,7 +1435,12 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     const handler = () => {
       try { state.lastSourceSel = snapshotSourceSelection(deps.getEditor()) } catch {}
       // 一旦系统已经给出稳定选区，就别再用“强制显示”这套临时补丁
-      try { if (hasTextSelection()) state.forceVisible = false } catch {}
+      try {
+        if (hasTextSelection()) {
+          state.forceVisible = false
+          state.forceStickyUntil = 0
+        }
+      } catch {}
       updateToolbarVisibilityBySelection()
     }
 
@@ -1466,12 +1482,15 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
             state.forceAnchorX = t.clientX
             state.forceAnchorY = t.clientY
             state.forceVisible = false
+            state.forceStickyUntil = 0
             clearLP()
             state.longPressTimer = (setTimeout as any)(() => {
               try {
                 // 已经有选区就让正常逻辑接管；否则强制显示一次
                 if (hasTextSelection()) return
                 state.forceVisible = true
+                // 给用户松手后点击按钮的窗口（别太短，否则又变成“松手就没了”）
+                state.forceStickyUntil = Date.now() + 8000
                 updateToolbarVisibilityBySelection()
               } catch {}
             }, 360)
@@ -1496,14 +1515,35 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
         ta.addEventListener('touchend', () => {
           try {
             clearLP()
-            // 松手后若无选区，则取消强制显示
-            if (!hasTextSelection()) state.forceVisible = false
+            // 松手后若无选区：保留工具条一段时间，给用户点按钮（不要立刻消失）
+            if (!hasTextSelection() && state.forceVisible) {
+              state.forceStickyUntil = Math.max(state.forceStickyUntil || 0, Date.now() + 8000)
+            }
             updateToolbarVisibilityBySelection()
           } catch {}
         }, { passive: true } as any)
       } catch {}
       try { ta.addEventListener('touchcancel', cancelForce as any, { passive: true } as any) } catch {}
     }
+
+    // 点击外部时：若当前无选区且是“强制显示”，就收起（避免常驻挡内容）
+    try {
+      document.addEventListener('touchstart', (e) => {
+        try {
+          if (!state.forceVisible) return
+          if (hasTextSelection()) return
+          const bar = state.toolbarEl
+          const t = (e as any).target as Node | null
+          if (!t) return
+          if (bar && bar.contains(t)) return
+          const ta = getEditorOrNull()
+          if (ta && ta.contains(t as any)) return
+          state.forceVisible = false
+          state.forceStickyUntil = 0
+          updateToolbarVisibilityBySelection()
+        } catch {}
+      }, { capture: true, passive: true } as any)
+    } catch {}
 
     // 初次刷新
     try { handler() } catch {}
