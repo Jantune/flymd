@@ -1562,6 +1562,7 @@ pub fn run() {
           force_remove_path,
           read_text_file_any,
           write_text_file_any,
+          list_dir_any,
         get_pending_open_path,
       http_xmlrpc_post,
       ai_novel_api,
@@ -2498,6 +2499,50 @@ async fn write_text_file_any(path: String, content: String) -> Result<(), String
   .map_err(|e| format!("join error: {e}"))??;
 
   Ok(())
+}
+
+// 为插件提供的“任意目录列表”命令：用于兼容缺失 latest.json 时从快照目录推断最新备份
+#[derive(serde::Serialize)]
+struct FlymdDirEntryLite {
+  name: String,
+  path: String,
+  is_dir: bool,
+  is_file: bool,
+}
+
+#[tauri::command]
+async fn list_dir_any(path: String) -> Result<Vec<FlymdDirEntryLite>, String> {
+  use std::fs;
+  use std::path::PathBuf;
+
+  let dir = PathBuf::from(path.clone());
+  if !dir.is_dir() {
+    return Err(format!("path 不是有效目录: {}", path));
+  }
+
+  let entries = tauri::async_runtime::spawn_blocking(move || {
+    let mut out: Vec<FlymdDirEntryLite> = Vec::new();
+    let rd = fs::read_dir(&dir).map_err(|e| format!("read_dir error ({}): {}", dir.display(), e))?;
+    for entry in rd {
+      let entry = entry.map_err(|e| format!("read_dir entry error: {e}"))?;
+      let p = entry.path();
+      let ft = entry
+        .file_type()
+        .map_err(|e| format!("file_type error ({}): {e}", p.display()))?;
+      let name = entry.file_name().to_string_lossy().to_string();
+      out.push(FlymdDirEntryLite {
+        name,
+        path: p.to_string_lossy().to_string(),
+        is_dir: ft.is_dir(),
+        is_file: ft.is_file(),
+      });
+    }
+    Ok::<Vec<FlymdDirEntryLite>, String>(out)
+  })
+  .await
+  .map_err(|e| format!("join error: {e}"))??;
+
+  Ok(entries)
 }
 
 // 前端兜底查询：获取并清空待打开路径，避免事件竞态丢失

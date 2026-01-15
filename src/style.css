@@ -1750,9 +1750,6 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
   border-radius: 4px;
   background: var(--bg);
   max-width: 400px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1767,6 +1764,37 @@ body.focus-mode .lib-float-toggle.show { display: flex; }
 .notification-item .notification-text {
   flex: 1;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 通知动作按钮 */
+.notification-item .notification-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.notification-item .notification-action-btn {
+  font-size: 12px;
+  line-height: 1;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(127,127,127,0.06);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.notification-item .notification-action-btn:hover {
+  background: rgba(127,127,127,0.12);
+}
+
+.notification-item .notification-action-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* 可点击的通知 */

@@ -858,11 +858,86 @@ async function decorateAIMath(container, context) {
 }
 
 // 网络请求重试机制（支持 5xx 服务器错误自动重试）
+function _aiPickTauriHttpFetch(){
+  try {
+    const tauri = (globalThis && globalThis.__TAURI__) ? globalThis.__TAURI__ : null
+    if (!tauri) return null
+    // Tauri v2：插件 API
+    if (tauri.plugin && tauri.plugin.http && typeof tauri.plugin.http.fetch === 'function') return tauri.plugin.http.fetch
+    // 少数环境挂在 __TAURI__.http 上
+    if (tauri.http && typeof tauri.http.fetch === 'function') return tauri.http.fetch
+    return null
+  } catch {
+    return null
+  }
+}
+
+function _aiTryParseJsonLoose(raw){
+  try {
+    const s = String(raw || '').trim()
+    if (!s) return null
+    // 1) 标准 JSON
+    try { return JSON.parse(s) } catch {}
+
+    // 2) SSE：data: {...}\n\n（取最后一个可解析的 payload）
+    try {
+      const lines = s.split(/\r?\n/)
+      const payloads = []
+      for (const line of lines) {
+        const m = String(line || '').match(/^\s*data:\s*(.*)\s*$/)
+        if (!m) continue
+        const p = String(m[1] || '').trim()
+        if (!p || p === '[DONE]') continue
+        payloads.push(p)
+      }
+      for (let i = payloads.length - 1; i >= 0; i--) {
+        try { return JSON.parse(payloads[i]) } catch {}
+      }
+    } catch {}
+
+    // 3) NDJSON：一行一个 JSON（取最后一个可解析的行）
+    try {
+      const lines = s.split(/\r?\n/).map(x => String(x || '').trim()).filter(Boolean)
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try { return JSON.parse(lines[i]) } catch {}
+      }
+    } catch {}
+
+    // 4) 宽松提取：截取第一段 {...}
+    try {
+      const a = s.indexOf('{')
+      const b = s.lastIndexOf('}')
+      if (a >= 0 && b > a) {
+        const sub = s.slice(a, b + 1)
+        try { return JSON.parse(sub) } catch {}
+      }
+    } catch {}
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+async function _aiFetch(url, options){
+  const tf = _aiPickTauriHttpFetch()
+  if (tf) {
+    // 目标：优先用宿主侧 http（绕过 WebView CORS/预检）。失败再回退到原生 fetch。
+    try {
+      const opt = (options && typeof options === 'object') ? { ...options } : {}
+      // AbortSignal 无法跨 IPC 序列化
+      try { if (opt && opt.signal) delete opt.signal } catch {}
+      return await tf(url, opt)
+    } catch {}
+  }
+  return await fetch(url, options)
+}
+
 async function fetchWithRetry(url, options, maxRetries = 3) {
   let lastError = null
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const res = await fetch(url, options)
+      const res = await _aiFetch(url, options)
       // 5xx 服务器错误 - 重试
       if (res.status >= 500 && attempt < maxRetries - 1) {
         const waitMs = 1000 * (attempt + 1)
@@ -943,7 +1018,10 @@ function buildApiUrl(cfg){
   // 免费代理模式：使用硬编码的代理地址，保留用户的自定义配置
   if (isFreeProvider(cfg)) return 'https://flymd.llingfei.com/ai/ai_proxy.php'
   const base = String((cfg && cfg.baseUrl) || 'https://api.siliconflow.cn/v1').trim()
-  return base.replace(/\/$/, '') + '/chat/completions'
+  const clean = base.replace(/\/+$/, '')
+  // 兼容：用户直接填完整的 OpenAI 兼容路径
+  if (/\/chat\/completions$/i.test(clean)) return clean
+  return clean + '/chat/completions'
 }
 function buildApiHeaders(cfg){
     const headers = { 'Content-Type':'application/json' }
@@ -974,7 +1052,7 @@ async function ensureApiConfig(context, overrides = {}){
 async function performAIRequest(cfg, bodyObj){
   const url = buildApiUrl(cfg)
   const headers = buildApiHeaders(cfg)
-  const response = await fetch(url, { method:'POST', headers, body: JSON.stringify(bodyObj) })
+  const response = await _aiFetch(url, { method:'POST', headers, body: JSON.stringify(bodyObj) })
   if (!response.ok) {
     let message = 'API 调用失败：' + response.status
     try {
@@ -983,8 +1061,7 @@ async function performAIRequest(cfg, bodyObj){
     } catch {}
     throw new Error(message)
   }
-  let data = null
-  try { data = await response.json() } catch {}
+  const data = _aiTryParseJsonLoose(await response.text())
   const text = String(data?.choices?.[0]?.message?.content || '').trim()
   return { text, data }
 }
@@ -1000,10 +1077,7 @@ async function handleFreeApiError(context, res){
     }
     let raw = ''
     try { raw = await res.text() } catch {}
-    let data = null
-    if (raw) {
-      try { data = JSON.parse(raw) } catch {}
-    }
+    const data = _aiTryParseJsonLoose(raw)
     const status = res.status
     const reason = data && typeof data.reason === 'string' ? data.reason : ''
 
@@ -3103,9 +3177,9 @@ function isDefaultSessionName(name){
     const body = JSON.stringify({ model: resolveModelId(cfg), stream: false, messages: [ { role:'system', content: sys }, { role:'user', content: prompt } ] })
     let name = ''
     try {
-      const r = await fetch(url, { method:'POST', headers, body })
+      const r = await _aiFetch(url, { method:'POST', headers, body })
       const t = await r.text()
-      const j = t? JSON.parse(t):null
+      const j = _aiTryParseJsonLoose(t)
       name = shorten(j?.choices?.[0]?.message?.content || '', 12).replace(/[\s\n]+/g,'').replace(/[「」\[\]\(\)\{\}\"\'\.,，。!！?？:：;；]/g,'')
     } catch {}
     if (!name) return
@@ -4446,12 +4520,12 @@ async function translateText(context) {
       stream: false
     })
 
-    const response = await fetch(url, { method: 'POST', headers, body })
+    const response = await _aiFetch(url, { method: 'POST', headers, body })
     if (!response.ok) {
       throw new Error('API 调用失败：' + response.status)
     }
 
-    const data = await response.json()
+    const data = _aiTryParseJsonLoose(await response.text())
     const translation = String(data?.choices?.[0]?.message?.content || '').trim()
 
     if (!translation) {
@@ -4551,12 +4625,12 @@ async function translateText(context) {
       stream: false
     })
 
-    const response = await fetch(url, { method: 'POST', headers, body })
+    const response = await _aiFetch(url, { method: 'POST', headers, body })
     if (!response.ok) {
       throw new Error('API 调用失败：' + response.status)
     }
 
-    const data = await response.json()
+    const data = _aiTryParseJsonLoose(await response.text())
     const todos = String(data?.choices?.[0]?.message?.content || '').trim()
 
     if (!todos) {
@@ -4706,12 +4780,12 @@ async function generateTodos(context){
       stream: false
     })
 
-    const response = await fetch(url, { method: 'POST', headers, body })
+    const response = await _aiFetch(url, { method: 'POST', headers, body })
     if (!response.ok) {
       throw new Error('API 调用失败：' + response.status)
     }
 
-    const data = await response.json()
+    const data = _aiTryParseJsonLoose(await response.text())
     const todos = String(data?.choices?.[0]?.message?.content || '').trim()
 
     if (!todos) {
@@ -5330,7 +5404,7 @@ async function sendFromInputWithAction(context){
         }
         removeThinking()
         const text = await r.text()
-        const data = text ? JSON.parse(text) : null
+        const data = _aiTryParseJsonLoose(text)
         finalText = data?.choices?.[0]?.message?.content || ''
         draft.textContent = finalText
       } else {
@@ -5385,7 +5459,7 @@ async function sendFromInputWithAction(context){
             }
             removeThinking()
             const text = await r3.text()
-            const data = text ? JSON.parse(text) : null
+            const data = _aiTryParseJsonLoose(text)
             const ctt = data?.choices?.[0]?.message?.content || ''
             finalText = ctt
             draft.textContent = finalText
