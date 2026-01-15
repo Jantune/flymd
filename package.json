@@ -11,7 +11,7 @@
     "tauri": "node scripts/tauri-wrapper.cjs",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "android:patch": "node scripts/patch-android-tauri-settings.cjs && node scripts/patch-android-icons.cjs && node scripts/patch-android-signing.cjs && node scripts/patch-android-immersive.cjs",
+    "android:patch": "node scripts/patch-android-tauri-settings.cjs && node scripts/patch-android-icons.cjs && node scripts/patch-android-signing.cjs && node scripts/patch-android-softinput.cjs && node scripts/patch-android-immersive.cjs",
     "pretauri": "node scripts/ensure-icons.cjs",
     "posttauri": "npm run -s android:patch",
     "pretauri:dev": "node scripts/ensure-icons.cjs",
