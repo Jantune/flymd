@@ -3302,6 +3302,21 @@ function initContextMenuListener() {
             // 让系统先完成选字/更新 selection，再读 selectedText
             setTimeout(() => {
               try {
+                // textarea：有选区时保留系统选字行为；无选区时才弹自定义菜单
+                if (targetEl === editor) {
+                  try {
+                    const s = (editor as HTMLTextAreaElement).selectionStart >>> 0
+                    const e = (editor as HTMLTextAreaElement).selectionEnd >>> 0
+                    if (s !== e) return
+                    // 无选区：为了避免弹出键盘，先 blur
+                    ;(editor as HTMLTextAreaElement).blur()
+                  } catch {}
+                }
+                // 预览/所见：如果系统已经选中了文字，就别再弹自定义菜单抢戏
+                try {
+                  const t = window.getSelection?.()?.toString?.() || ''
+                  if (String(t).trim()) return
+                } catch {}
                 const ctx = buildContextMenuContextFromTarget(targetEl)
                 void showContextMenu(x, y, ctx, {
                   pluginItems: pluginContextMenuItems,
@@ -7672,7 +7687,18 @@ try {
     // 移动端：提供一个“更多操作”入口，避免长按与系统选字冲突
     ;(window as any).flymdOpenContextMenu = () => {
       try {
-        const target = (document.activeElement as HTMLElement | null) || (editor as any)
+        const isMobileUi = document.body.classList.contains('platform-mobile')
+        const ae = document.activeElement as HTMLElement | null
+        const isEditorActive = !!(ae && ae === (editor as any))
+        // 需求：呼出菜单时尽量不要弹键盘（尤其是“空光标”场景）
+        if (isMobileUi && isEditorActive) {
+          try {
+            const s = (editor as HTMLTextAreaElement).selectionStart >>> 0
+            const e = (editor as HTMLTextAreaElement).selectionEnd >>> 0
+            if (s === e) (editor as HTMLTextAreaElement).blur()
+          } catch {}
+        }
+        const target = (ae as any) || (editor as any)
         const ctx = buildContextMenuContext(({ target } as any) as MouseEvent)
         void showContextMenu(0, 0, ctx, {
           pluginItems: pluginContextMenuItems,
@@ -7681,77 +7707,7 @@ try {
       } catch {}
     }
 
-    // 移动端：双击空白区触发右键菜单
-    ;(function initMobileDoubleTapContextMenu() {
-      const isMobileUi = () => document.body.classList.contains('platform-mobile')
-      if (!isMobileUi()) return
-
-      let lastTapTime = 0
-      let lastTapX = 0
-      let lastTapY = 0
-      const TAP_THRESHOLD = 300   // 双击时间阈值 ms
-      const MOVE_THRESHOLD = 30   // 位置容差 px
-
-      const handleDoubleTap = (e: TouchEvent) => {
-        if (!isMobileUi()) return
-
-        const now = Date.now()
-        const touch = e.changedTouches[0]
-        if (!touch) return
-        const { clientX, clientY } = touch
-
-        const timeDiff = now - lastTapTime
-        const xDiff = Math.abs(clientX - lastTapX)
-        const yDiff = Math.abs(clientY - lastTapY)
-
-        if (timeDiff < TAP_THRESHOLD && xDiff < MOVE_THRESHOLD && yDiff < MOVE_THRESHOLD) {
-          // 检测到双击，延迟检查是否有文字被选中
-          setTimeout(() => {
-            const sel = window.getSelection()
-            const selectedText = sel?.toString()?.trim() || ''
-
-            // 无选区 → 触发右键菜单
-            if (!selectedText) {
-              const ed = document.getElementById('editor') as HTMLTextAreaElement | null
-              if (document.activeElement === ed) {
-                const start = ed?.selectionStart || 0
-                const end = ed?.selectionEnd || 0
-                if (start === end) {
-                  ;(window as any).flymdOpenContextMenu?.()
-                }
-              } else {
-                ;(window as any).flymdOpenContextMenu?.()
-              }
-            }
-            // 有选区 → 不触发，保留双击选词行为
-          }, 50)
-
-          lastTapTime = 0  // 重置，避免三击误触发
-        } else {
-          lastTapTime = now
-          lastTapX = clientX
-          lastTapY = clientY
-        }
-      }
-
-      // 绑定编辑器
-      editor.addEventListener('touchend', handleDoubleTap, { passive: true })
-
-      // 绑定预览区
-      const preview = document.querySelector('.preview')
-      preview?.addEventListener('touchend', handleDoubleTap, { passive: true })
-
-      // 动态绑定所见模式
-      const bindWysiwyg = () => {
-        const root = document.getElementById('md-wysiwyg-root')
-        if (root && !(root as any).__dblTapBound) {
-          root.addEventListener('touchend', handleDoubleTap, { passive: true })
-          ;(root as any).__dblTapBound = true
-        }
-      }
-      bindWysiwyg()
-      new MutationObserver(bindWysiwyg).observe(document.body, { childList: true, subtree: true })
-    })()
+    // 注：移动端双击呼出右键菜单已在 initContextMenuListener 内统一处理，避免重复绑定导致双弹
 
     ;(window as any).flymdRenamePathWithDialog = (path: string) => renamePathWithDialog(path)
     ;(window as any).flymdRenameCurrentFileForTypecho = async (id: string, title: string) => {

@@ -40,6 +40,7 @@ type DomRectLike = {
 type SourceSelection = { start: number; end: number; text: string }
 
 const TOOLBAR_ID = 'flymd-floating-toolbar-builtin'
+const TOOLBAR_PREF_KEY = 'flymd:mobileFloatingToolbar:v1'
 
 // 轻量多语言：跟随宿主（flymd.locale），默认用系统语言
 const FT_LOCALE_LS_KEY = 'flymd.locale'
@@ -242,7 +243,100 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     dragStartY: 0 as number,
     barStartLeft: 0 as number,
     barStartTop: 0 as number,
+    // 移动端：长按时强制显示（即便系统尚未更新 selection）
+    forceVisible: false as boolean,
+    forceAnchorX: 0 as number,
+    forceAnchorY: 0 as number,
+    longPressTimer: 0 as any,
+    longPressStartX: 0 as number,
+    longPressStartY: 0 as number,
   }
+
+  type ToolbarPrefs = { order: string[]; hidden: string[] }
+  const loadToolbarPrefs = (defaults: string[]): ToolbarPrefs => {
+    try {
+      const raw = localStorage.getItem(TOOLBAR_PREF_KEY)
+      if (!raw) return { order: defaults.slice(), hidden: [] }
+      const parsed = JSON.parse(raw) as Partial<ToolbarPrefs> | null
+      const order = Array.isArray(parsed?.order) ? parsed!.order!.filter((x) => typeof x === 'string') : []
+      const hidden = Array.isArray(parsed?.hidden) ? parsed!.hidden!.filter((x) => typeof x === 'string') : []
+      const orderSet = new Set(order)
+      // 确保新命令不会“永远不出现”
+      const mergedOrder = order.concat(defaults.filter((id) => !orderSet.has(id)))
+      return { order: mergedOrder, hidden }
+    } catch {
+      return { order: defaults.slice(), hidden: [] }
+    }
+  }
+
+  const saveToolbarPrefs = (prefs: ToolbarPrefs) => {
+    try { localStorage.setItem(TOOLBAR_PREF_KEY, JSON.stringify(prefs)) } catch {}
+  }
+
+  // 撤销友好插入：通过 execCommand / setRangeText 保持到原生撤销栈（参考主入口实现）
+  const insertUndoable = (ta: HTMLTextAreaElement, text: string): boolean => {
+    try { ta.focus(); document.execCommand('insertText', false, text); return true } catch {
+      try {
+        const s = ta.selectionStart >>> 0
+        const e = ta.selectionEnd >>> 0
+        ta.setRangeText(text, s, e, 'end')
+        try { ta.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text })) } catch {
+          try { ta.dispatchEvent(new Event('input', { bubbles: true })) } catch {}
+        }
+        return true
+      } catch { return false }
+    }
+  }
+
+  const replaceRangeUndoable = (
+    ta: HTMLTextAreaElement,
+    start: number,
+    end: number,
+    text: string,
+    selStartAfter: number,
+    selEndAfter: number,
+  ): boolean => {
+    try {
+      const s = Math.max(0, Math.min(ta.value.length, start >>> 0))
+      const e = Math.max(0, Math.min(ta.value.length, end >>> 0))
+      ta.selectionStart = Math.min(s, e)
+      ta.selectionEnd = Math.max(s, e)
+      const ok = insertUndoable(ta, text)
+      try {
+        ta.selectionStart = Math.max(0, Math.min(ta.value.length, selStartAfter >>> 0))
+        ta.selectionEnd = Math.max(0, Math.min(ta.value.length, selEndAfter >>> 0))
+      } catch {}
+      return ok
+    } catch {
+      return false
+    }
+  }
+
+  const getEditorOrNull = (): HTMLTextAreaElement | null => {
+    try { return deps.getEditor() } catch { return null }
+  }
+
+  const getSourceSelFallbackToCaret = (ta: HTMLTextAreaElement | null): { start: number; end: number; text: string; hasSelection: boolean } => {
+    try {
+      const sel = state.lastSourceSel || snapshotSourceSelection(ta)
+      if (sel && sel.end > sel.start) return { start: sel.start >>> 0, end: sel.end >>> 0, text: String(sel.text || ''), hasSelection: true }
+    } catch {}
+    try {
+      if (ta) {
+        const s = ta.selectionStart >>> 0
+        const e = ta.selectionEnd >>> 0
+        if (s !== e) {
+          const a = Math.min(s, e)
+          const b = Math.max(s, e)
+          return { start: a, end: b, text: String(ta.value || '').slice(a, b), hasSelection: true }
+        }
+        return { start: s, end: e, text: '', hasSelection: false }
+      }
+    } catch {}
+    return { start: 0, end: 0, text: '', hasSelection: false }
+  }
+
+  type Command = { id: string; label: string; title: string; run: (btn: HTMLButtonElement) => void | Promise<void> }
 
   // 标题二级菜单：移动端空间宝贵，别把 H1~H6 这种按钮堆一排
   let headingMenuOutside: ((e: Event) => void) | null = null
@@ -443,23 +537,26 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     bar.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)'
     bar.style.userSelect = 'none'
     bar.style.cursor = 'move'
-    bar.style.touchAction = 'manipulation'
-    // 移动端宽度兜底：多按钮时允许换行，且不超过屏幕
+    // 移动端：按钮变多后，用“横向滑动”而不是换行堆叠（更少的特殊情况）
+    bar.style.touchAction = 'pan-x'
+    // 移动端宽度兜底：不超过屏幕，横向可滚动
     bar.style.maxWidth = 'calc(100vw - 16px)'
-    bar.style.flexWrap = 'wrap'
+    bar.style.flexWrap = 'nowrap'
+    bar.style.overflowX = 'auto'
+    bar.style.overflowY = 'hidden'
+    ;(bar.style as any).webkitOverflowScrolling = 'touch'
     bar.style.boxSizing = 'border-box'
 
-    type Command = { id: string; label: string; title: string; run: (btn: HTMLButtonElement) => void | Promise<void> }
-    const commands: Command[] = [
-      { id: 'heading', label: 'H', title: ftText('标题', 'Heading'), run: (btn) => openHeadingMenu(btn) },
-      { id: 'bold', label: 'B', title: ftText('加粗', 'Bold'), run: (_btn) => applyBold() },
-      { id: 'italic', label: 'I', title: ftText('斜体', 'Italic'), run: (_btn) => applyItalic() },
-      { id: 'ol', label: '1.', title: ftText('有序列表', 'Ordered list'), run: (_btn) => applyOrderedList() },
-      { id: 'ul', label: '•', title: ftText('无序列表', 'Bullet list'), run: (_btn) => applyBulletList() },
-      { id: 'link', label: '🔗', title: ftText('插入链接', 'Insert link'), run: (_btn) => applyLink() },
-      { id: 'image', label: 'IMG', title: ftText('插入图片', 'Insert image'), run: (_btn) => applyImage() },
-      { id: 'more', label: '⋯', title: ftText('更多功能', 'More'), run: (_btn) => openContextMenu() },
-    ]
+    const allCommands = buildAllCommands()
+
+    const defaultOrder = allCommands.map((c) => c.id)
+    const prefs = loadToolbarPrefs(defaultOrder)
+    const hidden = new Set(prefs.hidden || [])
+    // 防呆：把“设置/更多”藏起来就是自断手脚
+    hidden.delete('settings')
+    hidden.delete('more')
+    const cmdById = new Map(allCommands.map((c) => [c.id, c]))
+    const commands: Command[] = prefs.order.map((id) => cmdById.get(id)).filter((x): x is Command => !!x && !hidden.has(x.id))
 
     commands.forEach((cmd) => {
       const btn = document.createElement('button')
@@ -478,6 +575,7 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       btn.style.fontSize = '12px'
       btn.style.lineHeight = '1.4'
       btn.style.minWidth = '28px'
+      btn.style.flex = '0 0 auto'
       btn.style.textAlign = 'center'
       btn.style.touchAction = 'manipulation'
 
@@ -508,6 +606,20 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
 
       bar.appendChild(btn)
     })
+
+    // 隐藏横向滚动条（Android WebView）
+    try {
+      const styleId = 'flymd-ftb-scrollbar-style'
+      if (!document.getElementById(styleId)) {
+        const st = document.createElement('style')
+        st.id = styleId
+        st.textContent = `
+          #${TOOLBAR_ID}::-webkit-scrollbar{display:none;}
+          #${TOOLBAR_ID}{scrollbar-width:none;-ms-overflow-style:none;}
+        `
+        document.head.appendChild(st)
+      }
+    } catch {}
 
     // 拖动吸顶（保持与插件一致；移动端基本不会触发 mousedown）
     try { bar.addEventListener('mousedown', onToolbarMouseDown) } catch {}
@@ -568,18 +680,30 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     return getDomSelectionRect()
   }
 
+  const getForcedAnchorRect = (): DomRectLike | null => {
+    try {
+      if (!state.forceVisible) return null
+      const x = state.forceAnchorX || 0
+      const y = state.forceAnchorY || 0
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null
+      return { left: x, right: x + 1, top: y, bottom: y + 1, width: 1, height: 1 }
+    } catch {
+      return null
+    }
+  }
+
   const updateToolbarVisibilityBySelection = () => {
     if (state.raf) cancelAnimationFrame(state.raf)
     state.raf = requestAnimationFrame(() => {
       state.raf = 0
       if (!enabled()) { try { hideToolbar() } catch {} ; return }
       if (isReadingMode()) { try { hideToolbar() } catch {} ; return }
-      if (!hasTextSelection()) { try { hideToolbar() } catch {} ; return }
+      if (!hasTextSelection() && !state.forceVisible) { try { hideToolbar() } catch {} ; return }
 
       const bar = ensureToolbar()
       if (!bar) return
 
-      const rect = getSelectionRect()
+      const rect = getSelectionRect() || getForcedAnchorRect()
       if (rect) {
         const margin = 6
         const { w: viewportWidth, h: viewportHeight } = getViewportSize()
@@ -615,16 +739,6 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     })
   }
 
-  const getSourceSelectionRange = (): { doc: string; start: number; end: number; text: string; hasSelection: boolean } => {
-    const doc = deps.getDoc() || ''
-    const sel = state.lastSourceSel || snapshotSourceSelection(deps.getEditor())
-    const start = sel ? (sel.start >>> 0) : 0
-    const end = sel ? (sel.end >>> 0) : 0
-    const text = sel ? String(sel.text || '') : ''
-    const hasSelection = !!text && end > start
-    return { doc, start, end, text, hasSelection }
-  }
-
   const applyHeading = async (level: number) => {
     // 所见模式：走 Milkdown 命令
     if (deps.isWysiwygActive()) {
@@ -635,7 +749,10 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     }
 
     try {
-      const { doc, start, end } = getSourceSelectionRange()
+      const ta = getEditorOrNull()
+      if (!ta) return
+      const doc = String(ta.value || '')
+      const { start, end } = getSourceSelFallbackToCaret(ta)
       const lineStart = doc.lastIndexOf('\n', start - 1) + 1
       let lineEnd = doc.indexOf('\n', end)
       if (lineEnd === -1) lineEnd = doc.length
@@ -643,8 +760,7 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       const stripped = line.replace(/^#{1,6}\s+/, '')
       const prefix = '#'.repeat(clamp(level | 0, 1, 6)) + ' '
       const newLine = prefix + stripped
-      const nextDoc = doc.slice(0, lineStart) + newLine + doc.slice(lineEnd)
-      deps.setDoc(nextDoc)
+      replaceRangeUndoable(ta, lineStart, lineEnd, newLine, lineStart, lineStart + newLine.length)
     } catch (e) {
       deps.notice(ftText('设置标题失败: ', 'Heading failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
     }
@@ -658,10 +774,13 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       return
     }
     try {
-      const { doc, start, end, hasSelection } = getSourceSelectionRange()
+      const ta = getEditorOrNull()
+      if (!ta) return
+      const { start, end, hasSelection } = getSourceSelFallbackToCaret(ta)
       if (!hasSelection) { deps.notice(ftText('请先选中要加粗的文本', 'Select text first'), 'err', 1400); return }
-      const next = doc.slice(0, start) + '**' + doc.slice(start, end) + '**' + doc.slice(end)
-      deps.setDoc(next)
+      const mid = String(ta.value || '').slice(start, end)
+      const ins = `**${mid}**`
+      replaceRangeUndoable(ta, start, end, ins, start + 2, start + 2 + mid.length)
     } catch (e) {
       deps.notice(ftText('加粗失败: ', 'Bold failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
     }
@@ -675,12 +794,107 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       return
     }
     try {
-      const { doc, start, end, hasSelection } = getSourceSelectionRange()
+      const ta = getEditorOrNull()
+      if (!ta) return
+      const { start, end, hasSelection } = getSourceSelFallbackToCaret(ta)
       if (!hasSelection) { deps.notice(ftText('请先选中要设为斜体的文本', 'Select text first'), 'err', 1400); return }
-      const next = doc.slice(0, start) + '*' + doc.slice(start, end) + '*' + doc.slice(end)
-      deps.setDoc(next)
+      const mid = String(ta.value || '').slice(start, end)
+      const ins = `*${mid}*`
+      replaceRangeUndoable(ta, start, end, ins, start + 1, start + 1 + mid.length)
     } catch (e) {
       deps.notice(ftText('斜体失败: ', 'Italic failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
+    }
+  }
+
+  const applyUnderline = async () => {
+    try {
+      const ta = getEditorOrNull()
+      if (!ta) return
+      const { start, end, hasSelection } = getSourceSelFallbackToCaret(ta)
+      const mid = hasSelection ? String(ta.value || '').slice(start, end) : ''
+      if (!hasSelection) {
+        const ins = '<u></u>'
+        replaceRangeUndoable(ta, start, end, ins, start + 3, start + 3)
+        return
+      }
+      const ins = `<u>${mid}</u>`
+      replaceRangeUndoable(ta, start, end, ins, start + 3, start + 3 + mid.length)
+    } catch (e) {
+      deps.notice(ftText('下划线失败: ', 'Underline failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
+    }
+  }
+
+  const applyStrikethrough = async () => {
+    try {
+      const ta = getEditorOrNull()
+      if (!ta) return
+      const { start, end, hasSelection } = getSourceSelFallbackToCaret(ta)
+      const mid = hasSelection ? String(ta.value || '').slice(start, end) : ''
+      if (!hasSelection) {
+        const ins = '~~~~'
+        replaceRangeUndoable(ta, start, end, ins, start + 2, start + 2)
+        return
+      }
+      const ins = `~~${mid}~~`
+      replaceRangeUndoable(ta, start, end, ins, start + 2, start + 2 + mid.length)
+    } catch (e) {
+      deps.notice(ftText('删除线失败: ', 'Strikethrough failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
+    }
+  }
+
+  const applyCodeBlock = async () => {
+    try {
+      const ta = getEditorOrNull()
+      if (!ta) return
+      const { start, end, hasSelection } = getSourceSelFallbackToCaret(ta)
+      const mid = hasSelection ? String(ta.value || '').slice(start, end) : ''
+      if (!hasSelection) {
+        const ins = '```\n\n```'
+        replaceRangeUndoable(ta, start, end, ins, start + 4, start + 4)
+        return
+      }
+      const content = `\n${mid}\n`
+      const ins = '```' + content + '```'
+      replaceRangeUndoable(ta, start, end, ins, start + 4, start + 4 + mid.length)
+    } catch (e) {
+      deps.notice(ftText('代码块失败: ', 'Code block failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
+    }
+  }
+
+  const applyBlockquote = async () => {
+    try {
+      const ta = getEditorOrNull()
+      if (!ta) return
+      const doc = String(ta.value || '')
+      const { start, end, hasSelection } = getSourceSelFallbackToCaret(ta)
+
+      const quoteLines = (text: string): { next: string; delta: number } => {
+        const lines = text.split('\n')
+        const isAllQuoted = lines.filter((l) => l.trim().length > 0).every((l) => /^\s{0,3}>\s?/.test(l))
+        const nextLines = lines.map((l) => {
+          if (!l) return l
+          if (isAllQuoted) return l.replace(/^\s{0,3}>\s?/, '')
+          return '> ' + l
+        })
+        const next = nextLines.join('\n')
+        return { next, delta: next.length - text.length }
+      }
+
+      if (!hasSelection) {
+        const lineStart = doc.lastIndexOf('\n', start - 1) + 1
+        let lineEnd = doc.indexOf('\n', start)
+        if (lineEnd < 0) lineEnd = doc.length
+        const line = doc.slice(lineStart, lineEnd)
+        const { next } = quoteLines(line)
+        replaceRangeUndoable(ta, lineStart, lineEnd, next, lineStart, lineStart + next.length)
+        return
+      }
+
+      const body = doc.slice(start, end)
+      const { next } = quoteLines(body)
+      replaceRangeUndoable(ta, start, end, next, start, start + next.length)
+    } catch (e) {
+      deps.notice(ftText('引用失败: ', 'Quote failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
     }
   }
 
@@ -692,13 +906,14 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       return
     }
     try {
+      const ta = getEditorOrNull()
+      if (!ta) return
       const marker = '- '
-      const { doc, start, end, hasSelection } = getSourceSelectionRange()
+      const doc = String(ta.value || '')
+      const { start, end, hasSelection } = getSourceSelFallbackToCaret(ta)
       if (!hasSelection) { deps.notice(ftText('请先选中要转换为列表的内容', 'Select text first'), 'err', 1400); return }
 
-      const before = doc.slice(0, start)
       const body = doc.slice(start, end)
-      const after = doc.slice(end)
 
       const lines = body.split('\n')
       const trimmedLines = lines.map((l) => l.replace(/^\s+/, ''))
@@ -710,8 +925,8 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
         return marker + l
       })
 
-      const nextDoc = before + nextLines.join('\n') + after
-      deps.setDoc(nextDoc)
+      const nextBody = nextLines.join('\n')
+      replaceRangeUndoable(ta, start, end, nextBody, start, start + nextBody.length)
     } catch (e) {
       deps.notice(ftText('列表转换失败: ', 'List failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
     }
@@ -725,12 +940,13 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       return
     }
     try {
-      const { doc, start, end, hasSelection } = getSourceSelectionRange()
+      const ta = getEditorOrNull()
+      if (!ta) return
+      const doc = String(ta.value || '')
+      const { start, end, hasSelection } = getSourceSelFallbackToCaret(ta)
       if (!hasSelection) { deps.notice(ftText('请先选中要转换为列表的内容', 'Select text first'), 'err', 1400); return }
 
-      const before = doc.slice(0, start)
       const body = doc.slice(start, end)
-      const after = doc.slice(end)
 
       const lines = body.split('\n')
       const trimmedLines = lines.map((l) => l.replace(/^\s+/, ''))
@@ -744,9 +960,30 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
         return `${n}. ${l}`
       })
 
-      deps.setDoc(before + nextLines.join('\n') + after)
+      const nextBody = nextLines.join('\n')
+      replaceRangeUndoable(ta, start, end, nextBody, start, start + nextBody.length)
     } catch (e) {
       deps.notice(ftText('列表转换失败: ', 'List failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
+    }
+  }
+
+  const doUndo = () => {
+    try {
+      const ta = getEditorOrNull()
+      if (ta) ta.focus()
+      document.execCommand('undo')
+    } catch {
+      deps.notice(ftText('撤销失败', 'Undo failed'), 'err', 1400)
+    }
+  }
+
+  const doRedo = () => {
+    try {
+      const ta = getEditorOrNull()
+      if (ta) ta.focus()
+      document.execCommand('redo')
+    } catch {
+      deps.notice(ftText('重做失败', 'Redo failed'), 'err', 1400)
     }
   }
 
@@ -853,11 +1090,12 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
         return
       }
 
-      const { doc, start, end } = getSourceSelectionRange()
-      const before = doc.slice(0, start)
-      const after = doc.slice(end)
-      const md = `[${result.label}](${result.url})`
-      deps.setDoc(before + md + after)
+      const ta = getEditorOrNull()
+      if (!ta) return
+      const { start, end, hasSelection } = getSourceSelFallbackToCaret(ta)
+      const label = hasSelection ? String(ta.value || '').slice(start, end) : result.label
+      const md = `[${label}](${result.url})`
+      replaceRangeUndoable(ta, start, end, md, start + md.length, start + md.length)
     } catch (e) {
       deps.notice(ftText('插入链接失败: ', 'Link failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
     }
@@ -957,14 +1195,210 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
         return
       }
 
-      const { doc, start, end } = getSourceSelectionRange()
-      const before = doc.slice(0, start)
-      const after = doc.slice(end)
       const md = `![${result.alt}](${result.url})`
-      deps.setDoc(before + md + after)
+      const ta = getEditorOrNull()
+      if (!ta) return
+      const { start, end } = getSourceSelFallbackToCaret(ta)
+      replaceRangeUndoable(ta, start, end, md, start + md.length, start + md.length)
     } catch (e) {
       deps.notice(ftText('插入图片失败: ', 'Image failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
     }
+  }
+
+  const rebuildToolbar = () => {
+    try { closeHeadingMenu() } catch {}
+    try { state.toolbarEl?.remove() } catch {}
+    state.toolbarEl = null
+    try { updateToolbarVisibilityBySelection() } catch {}
+  }
+
+  const openToolbarSettings = () => {
+    try {
+      const overlay = document.createElement('div')
+      overlay.style.position = 'fixed'
+      overlay.style.inset = '0'
+      overlay.style.background = 'rgba(0,0,0,0.35)'
+      overlay.style.zIndex = '90020'
+
+      const panel = document.createElement('div')
+      panel.style.position = 'absolute'
+      panel.style.left = '50%'
+      panel.style.bottom = '12px'
+      panel.style.transform = 'translateX(-50%)'
+      panel.style.background = '#fff'
+      panel.style.borderRadius = '14px'
+      panel.style.width = 'min(96vw, 520px)'
+      panel.style.maxHeight = '80vh'
+      panel.style.overflow = 'auto'
+      panel.style.boxShadow = '0 8px 24px rgba(0,0,0,0.18)'
+      panel.style.fontSize = '14px'
+      panel.style.boxSizing = 'border-box'
+
+      const all = buildAllCommands()
+      const defaultOrder = all.map((c) => c.id)
+      const prefs = loadToolbarPrefs(defaultOrder)
+      const hidden = new Set(prefs.hidden || [])
+      hidden.delete('settings')
+      hidden.delete('more')
+      const pinned = new Set(['settings', 'more'])
+
+      const header = document.createElement('div')
+      header.style.padding = '14px 16px 10px'
+      header.style.borderBottom = '1px solid #eee'
+      header.innerHTML = `<div style="font-size:16px;font-weight:600;">${ftText('移动端工具条', 'Mobile toolbar')}</div>
+        <div style="margin-top:4px;color:#666;font-size:12px;">${ftText('勾选显示，使用 ↑↓ 调整顺序。', 'Toggle visibility and reorder with ↑↓.')}</div>`
+
+      const list = document.createElement('div')
+      list.style.padding = '8px 8px 0'
+
+      const render = () => {
+        list.innerHTML = ''
+        const byId = new Map(all.map((c) => [c.id, c]))
+        prefs.order = prefs.order.filter((id) => byId.has(id))
+
+        prefs.order.forEach((id, idx) => {
+          const def = byId.get(id)!
+          const row = document.createElement('div')
+          row.style.display = 'flex'
+          row.style.alignItems = 'center'
+          row.style.gap = '8px'
+          row.style.padding = '10px 8px'
+          row.style.borderBottom = '1px solid #f2f2f2'
+
+          const chk = document.createElement('input')
+          chk.type = 'checkbox'
+          chk.checked = !hidden.has(id)
+          if (pinned.has(id)) {
+            chk.checked = true
+            chk.disabled = true
+          }
+          chk.onchange = () => {
+            if (chk.checked) hidden.delete(id)
+            else hidden.add(id)
+          }
+
+          const label = document.createElement('div')
+          label.style.flex = '1'
+          label.style.display = 'flex'
+          label.style.flexDirection = 'column'
+          label.style.gap = '2px'
+          label.innerHTML = `<div>${escapeHtml(def.title || id)}</div><div style="font-size:11px;color:#888;">${escapeHtml(id)}</div>`
+
+          const up = document.createElement('button')
+          up.type = 'button'
+          up.textContent = '↑'
+          up.style.padding = '4px 8px'
+          up.style.borderRadius = '8px'
+          up.style.border = '1px solid #ddd'
+          up.style.background = '#f7f7f7'
+          up.disabled = idx === 0
+          up.onclick = () => {
+            if (idx <= 0) return
+            const tmp = prefs.order[idx - 1]
+            prefs.order[idx - 1] = prefs.order[idx]
+            prefs.order[idx] = tmp
+            render()
+          }
+
+          const down = document.createElement('button')
+          down.type = 'button'
+          down.textContent = '↓'
+          down.style.padding = '4px 8px'
+          down.style.borderRadius = '8px'
+          down.style.border = '1px solid #ddd'
+          down.style.background = '#f7f7f7'
+          down.disabled = idx === prefs.order.length - 1
+          down.onclick = () => {
+            if (idx >= prefs.order.length - 1) return
+            const tmp = prefs.order[idx + 1]
+            prefs.order[idx + 1] = prefs.order[idx]
+            prefs.order[idx] = tmp
+            render()
+          }
+
+          row.appendChild(chk)
+          row.appendChild(label)
+          row.appendChild(up)
+          row.appendChild(down)
+          list.appendChild(row)
+        })
+      }
+
+      const escapeHtml = (s: string) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      render()
+
+      const footer = document.createElement('div')
+      footer.style.display = 'flex'
+      footer.style.justifyContent = 'space-between'
+      footer.style.alignItems = 'center'
+      footer.style.padding = '12px 16px'
+      footer.style.gap = '8px'
+
+      const btnReset = document.createElement('button')
+      btnReset.type = 'button'
+      btnReset.textContent = ftText('恢复默认', 'Reset')
+      btnReset.style.padding = '8px 12px'
+      btnReset.style.borderRadius = '10px'
+      btnReset.style.border = '1px solid #ddd'
+      btnReset.style.background = '#f5f5f5'
+      btnReset.onclick = () => {
+        prefs.order = defaultOrder.slice()
+        hidden.clear()
+        render()
+      }
+
+      const btnOk = document.createElement('button')
+      btnOk.type = 'button'
+      btnOk.textContent = ftText('完成', 'Done')
+      btnOk.style.padding = '8px 14px'
+      btnOk.style.borderRadius = '10px'
+      btnOk.style.border = '1px solid #2563eb'
+      btnOk.style.background = '#2563eb'
+      btnOk.style.color = '#fff'
+      btnOk.onclick = () => {
+        const next: ToolbarPrefs = { order: prefs.order.slice(), hidden: Array.from(hidden).filter((id) => !pinned.has(id)) }
+        saveToolbarPrefs(next)
+        try { overlay.remove() } catch {}
+        rebuildToolbar()
+      }
+
+      footer.appendChild(btnReset)
+      footer.appendChild(btnOk)
+
+      panel.appendChild(header)
+      panel.appendChild(list)
+      panel.appendChild(footer)
+      overlay.appendChild(panel)
+      document.body.appendChild(overlay)
+
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          try { overlay.remove() } catch {}
+        }
+      })
+    } catch {
+      deps.notice(ftText('打开工具条设置失败', 'Failed to open toolbar settings'), 'err', 1600)
+    }
+  }
+
+  function buildAllCommands(): Command[] {
+    return [
+      { id: 'heading', label: 'H', title: ftText('标题', 'Heading'), run: (btn) => openHeadingMenu(btn) },
+      { id: 'bold', label: 'B', title: ftText('加粗', 'Bold'), run: (_btn) => applyBold() },
+      { id: 'italic', label: 'I', title: ftText('斜体', 'Italic'), run: (_btn) => applyItalic() },
+      { id: 'underline', label: 'U', title: ftText('下划线', 'Underline'), run: (_btn) => applyUnderline() },
+      { id: 'strike', label: 'S', title: ftText('删除线', 'Strikethrough'), run: (_btn) => applyStrikethrough() },
+      { id: 'codeblock', label: '</>', title: ftText('代码块', 'Code block'), run: (_btn) => applyCodeBlock() },
+      { id: 'quote', label: '>', title: ftText('引用', 'Quote'), run: (_btn) => applyBlockquote() },
+      { id: 'ol', label: '1.', title: ftText('有序列表', 'Ordered list'), run: (_btn) => applyOrderedList() },
+      { id: 'ul', label: '•', title: ftText('无序列表', 'Bullet list'), run: (_btn) => applyBulletList() },
+      { id: 'undo', label: '↶', title: ftText('撤销', 'Undo'), run: (_btn) => doUndo() },
+      { id: 'redo', label: '↷', title: ftText('重做', 'Redo'), run: (_btn) => doRedo() },
+      { id: 'link', label: '🔗', title: ftText('插入链接', 'Insert link'), run: (_btn) => applyLink() },
+      { id: 'image', label: 'IMG', title: ftText('插入图片', 'Insert image'), run: (_btn) => applyImage() },
+      { id: 'settings', label: '☰', title: ftText('设置工具条', 'Toolbar settings'), run: (_btn) => openToolbarSettings() },
+      { id: 'more', label: '⋯', title: ftText('更多功能', 'More'), run: (_btn) => openContextMenu() },
+    ]
   }
 
   const openContextMenu = () => {
@@ -989,6 +1423,8 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
   const bindSelectionWatchers = () => {
     const handler = () => {
       try { state.lastSourceSel = snapshotSourceSelection(deps.getEditor()) } catch {}
+      // 一旦系统已经给出稳定选区，就别再用“强制显示”这套临时补丁
+      try { if (hasTextSelection()) state.forceVisible = false } catch {}
       updateToolbarVisibilityBySelection()
     }
 
@@ -1008,6 +1444,65 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       try { ta.addEventListener('input', handler) } catch {}
       try { ta.addEventListener('focus', handler) } catch {}
       try { ta.addEventListener('blur', () => { setTimeout(handler, 0) }) } catch {}
+
+      // 长按显示：不阻止系统选字；只是补上“按住不放”期间 UI 不更新的问题
+      const clearLP = () => {
+        try { if (state.longPressTimer) { clearTimeout(state.longPressTimer); state.longPressTimer = 0 as any } } catch {}
+      }
+      const cancelForce = () => {
+        state.forceVisible = false
+        clearLP()
+        try { updateToolbarVisibilityBySelection() } catch {}
+      }
+
+      try {
+        ta.addEventListener('touchstart', (ev: TouchEvent) => {
+          try {
+            if (!enabled() || isReadingMode()) return
+            if (!ev.touches || ev.touches.length !== 1) return
+            const t = ev.touches[0]
+            state.longPressStartX = t.clientX
+            state.longPressStartY = t.clientY
+            state.forceAnchorX = t.clientX
+            state.forceAnchorY = t.clientY
+            state.forceVisible = false
+            clearLP()
+            state.longPressTimer = (setTimeout as any)(() => {
+              try {
+                // 已经有选区就让正常逻辑接管；否则强制显示一次
+                if (hasTextSelection()) return
+                state.forceVisible = true
+                updateToolbarVisibilityBySelection()
+              } catch {}
+            }, 360)
+          } catch {}
+        }, { passive: true } as any)
+      } catch {}
+
+      try {
+        ta.addEventListener('touchmove', (ev: TouchEvent) => {
+          try {
+            if (!state.longPressTimer) return
+            const t = ev.touches?.[0]
+            if (!t) return
+            const dx = t.clientX - state.longPressStartX
+            const dy = t.clientY - state.longPressStartY
+            if ((dx * dx + dy * dy) > (18 * 18)) clearLP()
+          } catch {}
+        }, { passive: true } as any)
+      } catch {}
+
+      try {
+        ta.addEventListener('touchend', () => {
+          try {
+            clearLP()
+            // 松手后若无选区，则取消强制显示
+            if (!hasTextSelection()) state.forceVisible = false
+            updateToolbarVisibilityBySelection()
+          } catch {}
+        }, { passive: true } as any)
+      } catch {}
+      try { ta.addEventListener('touchcancel', cancelForce as any, { passive: true } as any) } catch {}
     }
 
     // 初次刷新

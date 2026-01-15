@@ -524,13 +524,13 @@ body.platform-android #flymd-speech-record-fab.paused .flymd-rec-dot {
 body.platform-mobile .flymd-context-menu {
   max-width: none !important;
   width: auto !important;
-  border-radius: 14px !important;
-  font-size: 15px !important;
-  padding: 8px 0 !important;
+  border-radius: 12px !important;
+  font-size: 13px !important;
+  padding: 6px 0 !important;
 }
 
 body.platform-mobile .context-menu-item {
-  padding: 12px 14px !important;
+  padding: 10px 12px !important;
 }
 
 body.platform-mobile .context-menu-label {
