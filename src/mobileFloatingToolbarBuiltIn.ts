@@ -824,7 +824,12 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       const ta = getEditorOrNull()
       if (!ta) return
       const { start, end, hasSelection } = getSourceSelFallbackToCaret(ta)
-      if (!hasSelection) { deps.notice(ftText('请先选中要加粗的文本', 'Select text first'), 'err', 1400); return }
+      if (!hasSelection) {
+        // 无选中时插入 ****，光标放在中间
+        const ins = '****'
+        replaceRangeUndoable(ta, start, end, ins, start + 2, start + 2)
+        return
+      }
       const mid = String(ta.value || '').slice(start, end)
       const ins = `**${mid}**`
       replaceRangeUndoable(ta, start, end, ins, start + 2, start + 2 + mid.length)
@@ -837,19 +842,37 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
     if (deps.isWysiwygActive()) {
       const fn = deps.wysiwyg?.toggleItalic
       if (typeof fn === 'function') { await fn(); return }
-      deps.notice(ftText('所见模式暂不支持斜体命令', 'Italic not supported in WYSIWYG'), 'err', 1600)
+      deps.notice(ftText('所见模式暂不支��斜体命令', 'Italic not supported in WYSIWYG'), 'err', 1600)
       return
     }
     try {
       const ta = getEditorOrNull()
       if (!ta) return
       const { start, end, hasSelection } = getSourceSelFallbackToCaret(ta)
-      if (!hasSelection) { deps.notice(ftText('请先选中要设为斜体的文本', 'Select text first'), 'err', 1400); return }
+      if (!hasSelection) {
+        // 无选中时插入 **，光标放在中间
+        const ins = '**'
+        replaceRangeUndoable(ta, start, end, ins, start + 1, start + 1)
+        return
+      }
       const mid = String(ta.value || '').slice(start, end)
       const ins = `*${mid}*`
       replaceRangeUndoable(ta, start, end, ins, start + 1, start + 1 + mid.length)
     } catch (e) {
       deps.notice(ftText('斜体失败: ', 'Italic failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
+    }
+  }
+
+  const applyTodo = async () => {
+    try {
+      const ta = getEditorOrNull()
+      if (!ta) return
+      const { start, end } = getSourceSelFallbackToCaret(ta)
+      // 插入待办语法 - [ ] 并在后面添加空格，光标放在空格后
+      const ins = '- [ ] '
+      replaceRangeUndoable(ta, start, end, ins, start + ins.length, start + ins.length)
+    } catch (e) {
+      deps.notice(ftText('插入待办失败: ', 'Todo failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
     }
   }
 
@@ -1489,6 +1512,7 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
       { id: 'heading', label: 'H', title: ftText('标题', 'Heading'), run: (btn) => openHeadingMenu(btn) },
       { id: 'bold', label: 'B', title: ftText('加粗', 'Bold'), run: (_btn) => applyBold() },
       { id: 'italic', label: 'I', title: ftText('斜体', 'Italic'), run: (_btn) => applyItalic() },
+      { id: 'todo', label: '☐', title: ftText('待办', 'Todo'), run: (_btn) => applyTodo() },
       { id: 'underline', label: 'U', title: ftText('下划线', 'Underline'), run: (_btn) => applyUnderline() },
       { id: 'strike', label: 'S', title: ftText('删除线', 'Strikethrough'), run: (_btn) => applyStrikethrough() },
       { id: 'codeblock', label: '</>', title: ftText('代码块', 'Code block'), run: (_btn) => applyCodeBlock() },
