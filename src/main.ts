@@ -6833,6 +6833,130 @@ async function printCurrentDoc(): Promise<void> {
 }
 
 // 另存为
+// Android：系统“另存为”对话框走 SAF，无法定位到应用私有目录（内置库），导致用户无法保存到当前库。
+// 解决：在 Android 上改为“保存到当前库（所选目录）”，文件名由应用内输入框提供。
+async function saveAsAndroidToCurrentLibrary(): Promise<void> {
+  // 仅 Android 使用；其他平台仍走系统 save 对话框，避免破坏既有行为。
+  if (!isTauriRuntime()) {
+    alert('文件保存功能需要在 Tauri 应用中使用')
+    return
+  }
+  const platform = await (async () => { try { return await getPlatform() } catch { return '' as any } })()
+  if (platform !== 'android') return
+
+  // Android：确保至少有一个可用库（默认本地库）
+  try { await ensureAndroidDefaultLibraryRoot() } catch {}
+
+  const root = await getLibraryRoot()
+  if (!root) {
+    alert('未初始化库目录：请先打开一次“库”')
+    return
+  }
+
+  const isContent = (p: string | null) => !!(p && typeof p === 'string' && p.startsWith('content://'))
+
+  const guessName = () => {
+    try {
+      if (currentFilePath) {
+        const s = String(currentFilePath)
+        const parts = s.replace(/\\/g, '/').split('/')
+        const last = parts[parts.length - 1] || ''
+        if (last) return last
+      }
+    } catch {}
+    return 'untitled.md'
+  }
+
+  const splitStemExt = (name: string): { stem: string; ext: string } => {
+    const s = String(name || '').trim()
+    const m = s.match(/^(.*?)(\.[^.]+)?$/)
+    return { stem: (m?.[1] ?? s) || s, ext: (m?.[2] ?? '') || '' }
+  }
+
+  // Android：默认保存到“当前选中目录”，否则退回当前文件所在目录，再否则库根目录。
+  let dir: string | null = null
+  try { dir = (fileTree as any)?.getSelectedDir?.() ?? null } catch {}
+  try {
+    if (!dir && currentFilePath && isInside(root, currentFilePath)) {
+      dir = String(currentFilePath).replace(/[\\/][^\\/]*$/, '')
+    }
+  } catch {}
+  if (!dir || !isInside(root, dir)) dir = root
+
+  const dirHint = (() => {
+    try {
+      if (isContent(dir)) {
+        const hint = safLocationHint(String(dir || ''))
+        return hint || '外置库目录（SAF）'
+      }
+      const p = String(dir || '').replace(/\\/g, '/').replace(/\/+$/, '')
+      return p.split('/').pop() || p || '库目录'
+    } catch {
+      return '库目录'
+    }
+  })()
+
+  const rawName = await showInputDialog({
+    title: '另存为',
+    message: `保存到：${dirHint}\n提示：要更换目录，请先在“库”侧栏中选中目标文件夹。`,
+    label: '文件名',
+    defaultValue: guessName(),
+    submitText: '保存',
+    cancelText: '取消',
+    required: true,
+  })
+  if (!rawName) return
+
+  // 统一清洗文件名，防止目录穿越/非法字符
+  let name = sanitizeSafName(String(rawName || '').trim(), guessName())
+  if (!name) return
+  if (!/\.[a-z0-9]+$/i.test(name)) name += '.md'
+
+  const createUniqueTextFile = async (parentDir: string, desiredName: string, content: string): Promise<string> => {
+    const { stem, ext } = splitStemExt(desiredName)
+    if (isContent(parentDir)) {
+      try { await persistSafUriPermission(parentDir) } catch {}
+      let ents: any[] = []
+      try { ents = (await safListDir(parentDir)) as any[] } catch { ents = [] }
+      const existing = new Set((ents || []).map((x) => String((x as any)?.name || '').trim()).filter(Boolean))
+      let finalName = desiredName
+      let i = 1
+      while (existing.has(finalName) && i < 10000) {
+        i += 1
+        finalName = `${stem} ${i}${ext}`
+      }
+      const uri = await safCreateFile(parentDir, finalName, 'text/plain')
+      await writeTextFileAnySafe(uri, content)
+      return uri
+    }
+    const base = String(parentDir || '').replace(/[\\/]+$/, '')
+    const sep = base.includes('\\') ? '\\' : '/'
+    const fullOf = (n: string) => base + sep + n
+    await ensureDir(base)
+    let finalName = desiredName
+    let full = fullOf(finalName)
+    let i = 1
+    while (await exists(full as any)) {
+      i += 1
+      if (i >= 10000) break
+      finalName = `${stem} ${i}${ext}`
+      full = fullOf(finalName)
+    }
+    await writeTextFileAnySafe(full, content)
+    return full
+  }
+
+  const target = await createUniqueTextFile(String(dir || root), name, String(editor.value || ''))
+  currentFilePath = target
+  dirty = false
+  refreshTitle()
+  await pushRecent(currentFilePath)
+  await renderRecentPanel(false)
+  try { await refreshLibraryUiAndTree(true) } catch {}
+  logInfo('Android 另存为成功（保存到库）', { path: target })
+  status.textContent = '文件已保存'
+  setTimeout(() => refreshStatus(), 2000)
+}
 async function saveAs() {
   try {
     // 检查 Tauri API
@@ -6840,6 +6964,15 @@ async function saveAs() {
       alert('文件保存功能需要在 Tauri 应用中使用')
       return
     }
+
+    // Android：系统保存对话框无法保存到应用私有目录（内置库）；改为直接保存到当前库目录。
+    try {
+      const platform = await getPlatform()
+      if (platform === 'android') {
+        await saveAsAndroidToCurrentLibrary()
+        return
+      }
+    } catch {}
 
     const guessName = () => {
       try {
