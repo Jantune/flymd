@@ -14,6 +14,10 @@ export type TwoChoiceResult = 'confirm' | 'cancel'
 export type BoolResult = boolean
 export type ActionDialogResult = string
 
+// “应用到所有文件”包装返回值（仅用于本轮同步的批量决策）
+export type ApplyToAllResult<T> = { result: T; applyToAll: boolean }
+type DialogApplyAllOptions = { withApplyToAll?: boolean }
+
 export type FormFieldKind = 'text' | 'password' | 'textarea' | 'select' | 'checkbox'
 export type FormFieldOption = { label: string; value: string }
 export type FormField = {
@@ -97,6 +101,25 @@ const dialogStyles = `
   line-height: 1.6;
   margin: 0 0 24px 0;
   white-space: pre-line;
+}
+
+/* “应用到所有文件”行（仅 WebDAV 同步类弹窗使用） */
+.custom-dialog-extra {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -12px 0 18px 0;
+  color: var(--fg);
+  opacity: 0.85;
+  font-size: 13px;
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+
+.custom-dialog-extra input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
 }
 
 .custom-dialog-buttons {
@@ -276,6 +299,22 @@ function injectStyles() {
     style.textContent = dialogStyles
     document.head.appendChild(style)
   }
+}
+
+function createApplyToAllRow(onChange: (checked: boolean) => void): HTMLElement {
+  const label = document.createElement('label')
+  label.className = 'custom-dialog-extra'
+
+  const cb = document.createElement('input')
+  cb.type = 'checkbox'
+  cb.onchange = () => onChange(cb.checked)
+
+  const text = document.createElement('span')
+  text.textContent = t('dlg.sync.applyAll')
+
+  label.appendChild(cb)
+  label.appendChild(text)
+  return label
 }
 
 /**
@@ -461,7 +500,15 @@ export function showLibraryDeleteDialog(
  * @param filename 文件名
  * @returns Promise<ConflictResult> - 'local': 保留本地, 'remote': 保留远程, 'cancel': 取消
  */
-export function showConflictDialog(filename: string): Promise<ConflictResult> {
+export function showConflictDialog(filename: string): Promise<ConflictResult>;
+export function showConflictDialog(
+  filename: string,
+  opts: { withApplyToAll: true }
+): Promise<ApplyToAllResult<ConflictResult>>;
+export function showConflictDialog(
+  filename: string,
+  opts?: DialogApplyAllOptions
+): Promise<ConflictResult | ApplyToAllResult<ConflictResult>> {
   return new Promise((resolve) => {
     injectStyles()
 
@@ -478,6 +525,11 @@ export function showConflictDialog(filename: string): Promise<ConflictResult> {
     const messageEl = document.createElement('div')
     messageEl.className = 'custom-dialog-message'
     messageEl.textContent = t('dlg.sync.conflict.msg', { name: filename })
+
+    let applyToAll = false
+    const extraRow = opts?.withApplyToAll
+      ? createApplyToAllRow((checked) => { applyToAll = checked })
+      : null
 
     const buttonsContainer = document.createElement('div')
     buttonsContainer.className = 'custom-dialog-buttons'
@@ -498,7 +550,8 @@ export function showConflictDialog(filename: string): Promise<ConflictResult> {
       overlay.style.animation = 'dialogFadeIn 0.1s ease reverse'
       setTimeout(() => {
         overlay.remove()
-        resolve(result)
+        if (opts?.withApplyToAll) resolve({ result, applyToAll })
+        else resolve(result)
       }, 100)
     }
 
@@ -512,6 +565,7 @@ export function showConflictDialog(filename: string): Promise<ConflictResult> {
 
     box.appendChild(titleEl)
     box.appendChild(messageEl)
+    if (extraRow) box.appendChild(extraRow)
     box.appendChild(buttonsContainer)
     overlay.appendChild(box)
     document.body.appendChild(overlay)
@@ -538,7 +592,15 @@ export function showConflictDialog(filename: string): Promise<ConflictResult> {
  * @param filename 文件名
  * @returns Promise<TwoChoiceResult> - 'confirm': 同步删除远程, 'cancel': 从远程恢复
  */
-export function showLocalDeleteDialog(filename: string): Promise<TwoChoiceResult> {
+export function showLocalDeleteDialog(filename: string): Promise<TwoChoiceResult>;
+export function showLocalDeleteDialog(
+  filename: string,
+  opts: { withApplyToAll: true }
+): Promise<ApplyToAllResult<TwoChoiceResult>>;
+export function showLocalDeleteDialog(
+  filename: string,
+  opts?: DialogApplyAllOptions
+): Promise<TwoChoiceResult | ApplyToAllResult<TwoChoiceResult>> {
   return new Promise((resolve) => {
     injectStyles()
 
@@ -556,6 +618,11 @@ export function showLocalDeleteDialog(filename: string): Promise<TwoChoiceResult
     messageEl.className = 'custom-dialog-message'
     messageEl.textContent = t('dlg.sync.localDelete.msg', { name: filename })
 
+    let applyToAll = false
+    const extraRow = opts?.withApplyToAll
+      ? createApplyToAllRow((checked) => { applyToAll = checked })
+      : null
+
     const buttonsContainer = document.createElement('div')
     buttonsContainer.className = 'custom-dialog-buttons'
 
@@ -571,7 +638,8 @@ export function showLocalDeleteDialog(filename: string): Promise<TwoChoiceResult
       overlay.style.animation = 'dialogFadeIn 0.1s ease reverse'
       setTimeout(() => {
         overlay.remove()
-        resolve(result)
+        if (opts?.withApplyToAll) resolve({ result, applyToAll })
+        else resolve(result)
       }, 100)
     }
 
@@ -583,6 +651,7 @@ export function showLocalDeleteDialog(filename: string): Promise<TwoChoiceResult
 
     box.appendChild(titleEl)
     box.appendChild(messageEl)
+    if (extraRow) box.appendChild(extraRow)
     box.appendChild(buttonsContainer)
     overlay.appendChild(box)
     document.body.appendChild(overlay)
@@ -609,7 +678,15 @@ export function showLocalDeleteDialog(filename: string): Promise<TwoChoiceResult
  * @param filename 文件名
  * @returns Promise<TwoChoiceResult> - 'confirm': 同步删除本地, 'cancel': 保留本地
  */
-export function showRemoteDeleteDialog(filename: string): Promise<TwoChoiceResult> {
+export function showRemoteDeleteDialog(filename: string): Promise<TwoChoiceResult>;
+export function showRemoteDeleteDialog(
+  filename: string,
+  opts: { withApplyToAll: true }
+): Promise<ApplyToAllResult<TwoChoiceResult>>;
+export function showRemoteDeleteDialog(
+  filename: string,
+  opts?: DialogApplyAllOptions
+): Promise<TwoChoiceResult | ApplyToAllResult<TwoChoiceResult>> {
   return new Promise((resolve) => {
     injectStyles()
 
@@ -627,6 +704,11 @@ export function showRemoteDeleteDialog(filename: string): Promise<TwoChoiceResul
     messageEl.className = 'custom-dialog-message'
     messageEl.textContent = t('dlg.sync.remoteDelete.msg', { name: filename })
 
+    let applyToAll = false
+    const extraRow = opts?.withApplyToAll
+      ? createApplyToAllRow((checked) => { applyToAll = checked })
+      : null
+
     const buttonsContainer = document.createElement('div')
     buttonsContainer.className = 'custom-dialog-buttons'
 
@@ -642,7 +724,8 @@ export function showRemoteDeleteDialog(filename: string): Promise<TwoChoiceResul
       overlay.style.animation = 'dialogFadeIn 0.1s ease reverse'
       setTimeout(() => {
         overlay.remove()
-        resolve(result)
+        if (opts?.withApplyToAll) resolve({ result, applyToAll })
+        else resolve(result)
       }, 100)
     }
 
@@ -654,6 +737,7 @@ export function showRemoteDeleteDialog(filename: string): Promise<TwoChoiceResul
 
     box.appendChild(titleEl)
     box.appendChild(messageEl)
+    if (extraRow) box.appendChild(extraRow)
     box.appendChild(buttonsContainer)
     overlay.appendChild(box)
     document.body.appendChild(overlay)
@@ -680,7 +764,15 @@ export function showRemoteDeleteDialog(filename: string): Promise<TwoChoiceResul
  * @param filename 文件名
  * @returns Promise<TwoChoiceResult> - 'confirm': 上传本地到远端, 'cancel': 仅保留本地
  */
-export function showUploadMissingRemoteDialog(filename: string): Promise<TwoChoiceResult> {
+export function showUploadMissingRemoteDialog(filename: string): Promise<TwoChoiceResult>;
+export function showUploadMissingRemoteDialog(
+  filename: string,
+  opts: { withApplyToAll: true }
+): Promise<ApplyToAllResult<TwoChoiceResult>>;
+export function showUploadMissingRemoteDialog(
+  filename: string,
+  opts?: DialogApplyAllOptions
+): Promise<TwoChoiceResult | ApplyToAllResult<TwoChoiceResult>> {
   return new Promise((resolve) => {
     injectStyles()
 
@@ -698,6 +790,11 @@ export function showUploadMissingRemoteDialog(filename: string): Promise<TwoChoi
     messageEl.className = 'custom-dialog-message'
     messageEl.textContent = t('dlg.sync.uploadMissing.msg', { name: filename })
 
+    let applyToAll = false
+    const extraRow = opts?.withApplyToAll
+      ? createApplyToAllRow((checked) => { applyToAll = checked })
+      : null
+
     const buttonsContainer = document.createElement('div')
     buttonsContainer.className = 'custom-dialog-buttons'
 
@@ -713,7 +810,8 @@ export function showUploadMissingRemoteDialog(filename: string): Promise<TwoChoi
       overlay.style.animation = 'dialogFadeIn 0.1s ease reverse'
       setTimeout(() => {
         overlay.remove()
-        resolve(result)
+        if (opts?.withApplyToAll) resolve({ result, applyToAll })
+        else resolve(result)
       }, 100)
     }
 
@@ -725,6 +823,7 @@ export function showUploadMissingRemoteDialog(filename: string): Promise<TwoChoi
 
     box.appendChild(titleEl)
     box.appendChild(messageEl)
+    if (extraRow) box.appendChild(extraRow)
     box.appendChild(buttonsContainer)
     overlay.appendChild(box)
     document.body.appendChild(overlay)
