@@ -175,6 +175,10 @@ body.platform-mobile #mobile-selection-toolbar .mst-btn:active {
   body.platform-mobile.kb-open .ProseMirror {
     padding-bottom: calc(16px + var(--flymd-kb-inset-bottom, 0px) + 40vh) !important;
   }
+  /* 所见 V2：实际滚动宿主是 scrollView，给它加底部空间更可靠 */
+  body.platform-mobile.kb-open #md-wysiwyg-root .scrollView {
+    padding-bottom: calc(16px + var(--flymd-kb-inset-bottom, 0px) + 40vh) !important;
+  }
 }
 
 /* ========== 抽屉遮罩层 ========== */

@@ -9323,8 +9323,24 @@ function getMobileKeyboardInsetBottomPx(): number {
 function installMobileKeyboardInsetCssVar(): void {
   try {
     const root = document.documentElement
+    if (!root) return
+
+    // MIUI/部分 Android WebView：visualViewport 可能不存在或在键盘弹出时不更新。
+    // 因此 `kb-open` 不能只依赖 inset>0；编辑区 focus 时也要打开兜底滚动空间。
+    const isEditorFocused = (): boolean => {
+      try {
+        const ae = document.activeElement as HTMLElement | null
+        if (!ae) return false
+        if (ae.id === 'editor') return true
+        // 所见 V2：实际可编辑区域在 #md-wysiwyg-root 内
+        try { if (typeof (ae as any).closest === 'function' && (ae as any).closest('#md-wysiwyg-root')) return true } catch {}
+        return false
+      } catch {
+        return false
+      }
+    }
+
     const vv = (window as any).visualViewport as VisualViewport | undefined
-    if (!root || !vv) return
 
     let raf = 0
     const update = () => {
@@ -9333,16 +9349,20 @@ function installMobileKeyboardInsetCssVar(): void {
         try {
           const px = getMobileKeyboardInsetBottomPx()
           root.style.setProperty('--flymd-kb-inset-bottom', px ? (px + 'px') : '0px')
-          try { document.body?.classList?.toggle('kb-open', px > 0) } catch {}
+          try {
+            const isMobile = !!document.body?.classList?.contains('platform-mobile')
+            if (isMobile) document.body?.classList?.toggle('kb-open', px > 0 || isEditorFocused())
+          } catch {}
         } catch {}
       })
     }
 
-    vv.addEventListener('resize', update)
-    vv.addEventListener('scroll', update)
+    try { vv?.addEventListener('resize', update) } catch {}
+    try { vv?.addEventListener('scroll', update) } catch {}
     window.addEventListener('resize', update)
     document.addEventListener('focusin', update, true)
-    document.addEventListener('focusout', update, true)
+    // focusout 时 activeElement 可能还没切换完成，延迟一拍再算
+    document.addEventListener('focusout', () => { try { setTimeout(update, 0) } catch { update() } }, true)
     update()
   } catch {}
 }
