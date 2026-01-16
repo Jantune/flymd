@@ -7129,8 +7129,6 @@ async function saveAs() {
         return
       }
     } catch {}
-  }
-
     // 非 Android：保持旧行为
     await saveAsWithSystemDialog()
   } catch (error) {
