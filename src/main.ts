@@ -7832,6 +7832,15 @@ try {
     ;(window as any).flymdGetDefaultPasteDir = () => getDefaultPasteDir()
     ;(window as any).flymdAlwaysSaveLocalImages = () => getAlwaysSaveLocalImages()
     ;(window as any).flymdSaveImageToLocalAndGetPath = (file: File, name: string, force?: boolean) => saveImageToLocalAndGetPath(file, name, force)
+    // 供内置工具条/插件使用：显式“手动插入图片”入口（不受 uploader.enabled 开关限制）
+    ;(window as any).flymdManualInsertImageFromFile = (file: File, name?: string, alt?: string) => {
+      try {
+        const fname = String(name || (file as any)?.name || 'image')
+        return _imageUploaderManualPick.startAsyncUploadFromFile(file, fname, alt)
+      } catch {
+        return Promise.resolve()
+      }
+    }
   }
 } catch {}
 

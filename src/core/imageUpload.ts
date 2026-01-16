@@ -147,9 +147,15 @@ async function saveBlobLocallyWithPrefs(
 }
 
 export function createImageUploader(deps: ImageUploadDeps) {
-  async function handleUploadCore(fileOrBlob: File | Blob, fname: string, mime?: string) {
+  async function handleUploadCore(
+    fileOrBlob: File | Blob,
+    fname: string,
+    mime?: string,
+    altText?: string,
+  ) {
     const id = genUploadId()
-    deps.insertAtCursor(`![${fname || 'image'}](uploading://${id})`)
+    const alt = String((altText && String(altText).trim()) || fname || 'image')
+    deps.insertAtCursor(`![${alt}](uploading://${id})`)
 
     void (async () => {
       try {
@@ -204,11 +210,11 @@ export function createImageUploader(deps: ImageUploadDeps) {
             /^[a-zA-Z]:/.test(localPath) ||
             /\\/.test(localPath)
           const mdUrl = needAngle ? `<${localPath}>` : localPath
-          replaceUploadingPlaceholder(deps, id, `![${fname}](${mdUrl})`)
+          replaceUploadingPlaceholder(deps, id, `![${alt}](${mdUrl})`)
           return
         }
         if (cloudUrl) {
-          replaceUploadingPlaceholder(deps, id, `![${fname}](${cloudUrl})`)
+          replaceUploadingPlaceholder(deps, id, `![${alt}](${cloudUrl})`)
           return
         }
       } catch {
@@ -217,13 +223,13 @@ export function createImageUploader(deps: ImageUploadDeps) {
     })()
   }
 
-  function startAsyncUploadFromFile(file: File, fname: string): Promise<void> {
-    void handleUploadCore(file, fname, file.type || 'application/octet-stream')
+  function startAsyncUploadFromFile(file: File, fname: string, altText?: string): Promise<void> {
+    void handleUploadCore(file, fname, file.type || 'application/octet-stream', altText)
     return Promise.resolve()
   }
 
-  function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string): Promise<void> {
-    void handleUploadCore(blob, fname, mime)
+  function startAsyncUploadFromBlob(blob: Blob, fname: string, mime: string, altText?: string): Promise<void> {
+    void handleUploadCore(blob, fname, mime, altText)
     return Promise.resolve()
   }
 

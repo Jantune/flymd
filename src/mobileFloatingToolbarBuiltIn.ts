@@ -1195,6 +1195,10 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
         const safeText = (s: string) => String(s || '').replace(/\"/g, '')
         panel.innerHTML = `
           <h3 style="margin:0 0 12px;font-size:16px;">${ftText('插入图片', 'Insert image')}</h3>
+          <div style="margin:6px 0 10px;">
+            <button id="ft-img-local" style="padding:6px 12px;border-radius:8px;border:1px solid #ddd;background:#f5f5f5;cursor:pointer;">${ftText('选择本地图片…', 'Choose local image...')}</button>
+            <span style="font-size:12px;color:#666;margin-left:8px;">${ftText('（自动插入）', '(auto insert)')}</span>
+          </div>
           <div style="margin:6px 0;">
             <div style="margin-bottom:4px;">${ftText('图片地址', 'Image URL')}</div>
             <input id="ft-img-url" type="text" value="https://"
@@ -1216,12 +1220,76 @@ export function initBuiltInFloatingToolbar(deps: BuiltInFloatingToolbarDeps): vo
 
         const urlInput = panel.querySelector('#ft-img-url') as HTMLInputElement | null
         const altInput = panel.querySelector('#ft-img-alt') as HTMLInputElement | null
+        const localBtn = panel.querySelector('#ft-img-local') as HTMLButtonElement | null
         const cancelBtn = panel.querySelector('#ft-img-cancel') as HTMLButtonElement | null
         const okBtn = panel.querySelector('#ft-img-ok') as HTMLButtonElement | null
 
         try { urlInput?.focus(); urlInput?.select() } catch {}
 
         const cleanup = () => { try { overlay.remove() } catch {} }
+
+        const fileToDataUrl = async (file: File): Promise<string> => {
+          return await new Promise<string>((resolve2, reject2) => {
+            try {
+              const fr = new FileReader()
+              fr.onerror = () => reject2(fr.error || new Error('读取文件失败'))
+              fr.onload = () => resolve2(String(fr.result || ''))
+              fr.readAsDataURL(file)
+            } catch (e) {
+              reject2(e as any)
+            }
+          })
+        }
+
+        if (localBtn) {
+          localBtn.onclick = () => {
+            try {
+              const input = document.createElement('input')
+              input.type = 'file'
+              input.accept = 'image/*'
+              input.multiple = false
+              input.style.position = 'fixed'
+              input.style.left = '-9999px'
+              input.style.top = '-9999px'
+              const cleanupInput = () => {
+                try { input.value = '' } catch {}
+                try { input.remove() } catch {}
+              }
+              input.addEventListener('change', async () => {
+                try {
+                  const f = (input.files && input.files[0]) ? input.files[0] : null
+                  cleanupInput()
+                  if (!f) return
+
+                  const alt = (altInput?.value || '').trim()
+                  const fn = (window as any)?.flymdManualInsertImageFromFile
+                  if (typeof fn === 'function') {
+                    fn(f, (f as any)?.name || 'image', alt)
+                    cleanup()
+                    resolve(null)
+                    return
+                  }
+
+                  // 兜底：没有宿主上传/本地保存入口时，退回到 dataURL（会膨胀文档体积）
+                  const dataUrl = await fileToDataUrl(f)
+                  if (urlInput) urlInput.value = dataUrl
+                  if (altInput && !altInput.value) altInput.value = (f as any)?.name || ''
+                  try { urlInput?.focus(); urlInput?.select() } catch {}
+                } catch (e) {
+                  cleanupInput()
+                  deps.notice(ftText('选择本地图片失败: ', 'Pick image failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
+                }
+              }, { once: true })
+              document.body.appendChild(input)
+              input.click()
+              window.setTimeout(() => {
+                try { if (document.body.contains(input)) cleanupInput() } catch {}
+              }, 90_000)
+            } catch (e) {
+              deps.notice(ftText('选择本地图片失败: ', 'Pick image failed: ') + String((e as any)?.message || e || ''), 'err', 1800)
+            }
+          }
+        }
 
         cancelBtn && (cancelBtn.onclick = () => { cleanup(); resolve(null) })
         okBtn && (okBtn.onclick = () => {

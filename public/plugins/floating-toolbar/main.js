@@ -1061,6 +1061,10 @@ function applyImage(context) {
 
     panel.innerHTML = `
       <h3 style="margin:0 0 12px;font-size:16px;">插入图片</h3>
+      <div style="margin:6px 0 10px;">
+        <button id="ft-img-local" style="padding:4px 8px;">${ftText('选择本地图片…', 'Choose local image...')}</button>
+        <span style="font-size:12px;color:#666;margin-left:8px;">${ftText('（自动插入）', '(auto insert)')}</span>
+      </div>
       <div style="margin:6px 0;">
         <div style="margin-bottom:4px;">图片地址</div>
         <input id="ft-img-url" type="text" value="https://"
@@ -1082,6 +1086,7 @@ function applyImage(context) {
 
     const urlInput = panel.querySelector('#ft-img-url');
     const altInput = panel.querySelector('#ft-img-alt');
+    const localBtn = panel.querySelector('#ft-img-local');
     const cancelBtn = panel.querySelector('#ft-img-cancel');
     const okBtn = panel.querySelector('#ft-img-ok');
 
@@ -1091,6 +1096,73 @@ function applyImage(context) {
     const cleanup = () => {
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
     };
+
+    const fileToDataUrl = (file) => {
+      return new Promise((resolve, reject) => {
+        try {
+          const fr = new FileReader();
+          fr.onerror = () => reject(fr.error || new Error('读取文件失败'));
+          fr.onload = () => resolve(String(fr.result || ''));
+          fr.readAsDataURL(file);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    };
+
+    if (localBtn) {
+      localBtn.onclick = () => {
+        try {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'image/*';
+          input.multiple = false;
+          input.style.position = 'fixed';
+          input.style.left = '-9999px';
+          input.style.top = '-9999px';
+
+          const cleanupInput = () => {
+            try { input.value = ''; } catch {}
+            try { input.remove(); } catch {}
+          };
+
+          input.addEventListener('change', async () => {
+            try {
+              const f = (input.files && input.files[0]) ? input.files[0] : null;
+              cleanupInput();
+              if (!f) return;
+
+              const alt = (altInput && altInput.value ? altInput.value : '').trim();
+              const fn = (window && window.flymdManualInsertImageFromFile) ? window.flymdManualInsertImageFromFile : null;
+              if (typeof fn === 'function') {
+                fn(f, f.name || 'image', alt);
+                cleanup();
+                return;
+              }
+
+              // 兜底：没有宿主上传/本地保存入口时，退回到 dataURL（会膨胀文档体积）
+              const dataUrl = await fileToDataUrl(f);
+              urlInput.value = dataUrl;
+              if (altInput && !altInput.value) altInput.value = f.name || '';
+              try { urlInput.focus(); urlInput.select(); } catch {}
+            } catch (e) {
+              cleanupInput();
+              context.ui.notice(ftText('选择本地图片失败: ', 'Pick image failed: ') + (e && e.message ? e.message : String(e)), 'err');
+            }
+          }, { once: true });
+
+          document.body.appendChild(input);
+          input.click();
+          window.setTimeout(() => {
+            try {
+              if (document.body.contains(input)) cleanupInput();
+            } catch {}
+          }, 90_000);
+        } catch (e) {
+          context.ui.notice(ftText('选择本地图片失败: ', 'Pick image failed: ') + (e && e.message ? e.message : String(e)), 'err');
+        }
+      };
+    }
 
     cancelBtn.onclick = () => {
       cleanup();
