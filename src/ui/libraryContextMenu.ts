@@ -7,17 +7,22 @@ import { openRenameDialog } from './linkDialogs'
 import { newFileSafe, newFolderSafe } from '../fileTree'
 import { showLibraryDeleteDialog } from '../dialog'
 import { dispatchPathDeleted } from '../core/pathEvents'
+import { getPlatform } from '../platform'
 
 export type LibraryContextMenuDeps = {
   getCurrentFilePath(): string | null
   isDirty(): boolean
   normalizePath(p: string): string
   getLibraryRoot(): Promise<string | null>
+  // 返回“当前选中的目录”（用于移动端在库内移动：不走系统目录选择器）
+  getSelectedDir(): string | null
   renameFileSafe(path: string, newName: string): Promise<string>
   deleteFileSafe(path: string, toTrash: boolean): Promise<void>
   openFile(path: string): Promise<void>
   ensureTreeInitialized(): Promise<void>
   refreshTree(): Promise<void>
+  // 文件在库内被移动后回调（用于同步当前打开文件路径）
+  onMoved(src: string, dst: string): void
   updateTitle(): void
   confirmNative(msg: string): Promise<boolean>
   exists(path: string): Promise<boolean>
@@ -191,18 +196,39 @@ export function initLibraryContextMenu(deps: LibraryContextMenuDeps): void {
           alert('仅允许移动库内文件/文件夹')
           return
         }
-        const openDlg = win?.flymdOpenDirectory as ((defaultDir: string) => Promise<string>) | undefined
-        if (typeof openDlg !== 'function') {
-          alert('该功能需要在 Tauri 应用中使用')
-          return
-        }
+
+        const platform = await (async () => { try { return await getPlatform() } catch { return 'unknown' as any } })()
+        const isContent = (p: string) => String(p || '').startsWith('content://')
         const defaultDir = path.replace(/[\\/][^\\/]*$/, '')
-        const dest = await openDlg(defaultDir || root)
-        if (!dest) return
-        if (!isInside(root, dest)) {
-          alert('仅允许移动到库目录内')
-          return
+
+        // Android：系统“选择目录”看不到应用私有目录（内置库），所以移动必须走“库内选中目录”。
+        let dest = ''
+        if (platform === 'android') {
+          // SAF：移动未实现（需要 DocumentsContract.moveDocument），避免假动作导致用户误解
+          if (isContent(root) || isContent(path)) {
+            alert('外置库（SAF）暂不支持移动')
+            return
+          }
+          dest = String(deps.getSelectedDir() || '').trim()
+          if (!dest || !isInside(root, dest) || dest === defaultDir) {
+            alert('请先在库中选中目标文件夹（不同于当前位置），再执行移动')
+            return
+          }
+        } else {
+          // 桌面端：继续使用系统“选择目录”
+          const openDlg = win?.flymdOpenDirectory as ((defaultDir: string) => Promise<string>) | undefined
+          if (typeof openDlg !== 'function') {
+            alert('该功能需要在 Tauri 应用中使用')
+            return
+          }
+          dest = await openDlg(defaultDir || root)
+          if (!dest) return
+          if (!isInside(root, dest)) {
+            alert('仅允许移动到库目录内')
+            return
+          }
         }
+
         const name = (path.split(/[\\/]+/).pop() || '')
         const sep = dest.includes('\\') ? '\\' : '/'
         const dst = dest.replace(/[\\/]+$/, '') + sep + name
@@ -212,6 +238,7 @@ export function initLibraryContextMenu(deps: LibraryContextMenuDeps): void {
           if (!ok) return
         }
         await deps.moveFileSafe(path, dst)
+        try { deps.onMoved(path, dst) } catch {}
         await deps.refreshTree()
       } catch (e) {
         console.error('移动失败', e)

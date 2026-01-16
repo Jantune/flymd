@@ -6957,22 +6957,15 @@ async function saveAsAndroidToCurrentLibrary(): Promise<void> {
   status.textContent = '文件已保存'
   setTimeout(() => refreshStatus(), 2000)
 }
-async function saveAs() {
+
+// 旧方案：走系统“另存为”对话框（可保存到任意可见目录/SAF）
+async function saveAsWithSystemDialog(): Promise<void> {
   try {
     // 检查 Tauri API
     if (typeof save !== 'function') {
       alert('文件保存功能需要在 Tauri 应用中使用')
       return
     }
-
-    // Android：系统保存对话框无法保存到应用私有目录（内置库）；改为直接保存到当前库目录。
-    try {
-      const platform = await getPlatform()
-      if (platform === 'android') {
-        await saveAsAndroidToCurrentLibrary()
-        return
-      }
-    } catch {}
 
     const guessName = () => {
       try {
@@ -6994,13 +6987,42 @@ async function saveAs() {
       return d + sep + n
     }
 
+    const isContent = (p: string | null) => !!(p && typeof p === 'string' && p.startsWith('content://'))
+
+    const writeBinaryAnySafe = async (path: string, bytes: Uint8Array) => {
+      const p = String(path || '').trim()
+      if (!p) throw new Error('写入目标路径为空')
+      if (p.startsWith('content://')) {
+        try { await invoke('android_persist_uri_permission', { uri: p }) } catch {}
+        // 使用 base64 写入二进制（Android SAF）
+        const toBase64 = (u8: Uint8Array): string => {
+          // 分块避免堆栈/内存峰值过高
+          const chunk = 0x8000
+          let bin = ''
+          for (let i = 0; i < u8.length; i += chunk) {
+            const sub = u8.subarray(i, i + chunk)
+            // eslint-disable-next-line prefer-spread
+            bin += String.fromCharCode.apply(null, sub as any)
+          }
+          return btoa(bin)
+        }
+        const b64 = toBase64(bytes)
+        await invoke('android_write_uri_base64', { uri: p, base64: b64 })
+        return
+      }
+      await writeFile(p as any, bytes as any)
+    }
+
     // 让“另存为”默认落在当前库目录（仅对普通路径有效；content:// 目录无法作为 defaultPath）
     let defaultPath: string | undefined = undefined
     try {
       const name = guessName()
+      const platform = await (async () => { try { return await getPlatform() } catch { return '' as any } })()
       const root = await getLibraryRoot()
-      const isContent = (p: string | null) => !!(p && typeof p === 'string' && p.startsWith('content://'))
-      if (!isContent(currentFilePath as any) && currentFilePath) {
+      // Android：系统对话框走 SAF，传入应用私有路径可能导致对话框行为异常；只给文件名最稳。
+      if (platform === 'android') {
+        defaultPath = name
+      } else if (!isContent(currentFilePath as any) && currentFilePath) {
         const p = String(currentFilePath)
         const dir = p.replace(/\\/g, '/').split('/').slice(0, -1).join('/')
         if (dir) defaultPath = joinPath(dir, name)
@@ -7024,7 +7046,8 @@ async function saveAs() {
       logDebug('用户取消另存为操作')
       return
     }
-    logInfo('另存为文件', { path: target })
+    logInfo('另存为文件（系统对话框）', { path: target })
+
     // 导出分支：根据扩展名处理 PDF/DOCX/WPS
     const ext = (() => { const m = String(target).toLowerCase().match(/\.([a-z0-9]+)$/); return m ? m[1] : ''; })();
     if (ext === 'pdf' || ext === 'docx' || ext === 'wps') {
@@ -7036,7 +7059,7 @@ async function saveAs() {
           if (!el) throw new Error('未找到预览内容容器');
           const { exportPdf } = await import('./exporters/pdf');
           const bytes = await exportPdf(el, {});
-          await writeFile(target as any, bytes as any);
+          await writeBinaryAnySafe(target as any, bytes as any);
         } else {
           status.textContent = '正在导出 ' + ext.toUpperCase() + '...';
           await renderPreview();
@@ -7046,11 +7069,11 @@ async function saveAs() {
           if (ext === 'docx') {
             const { exportDocx } = await import('./exporters/docx');
             const bytes = await exportDocx(el as any, {});
-            await writeFile(target as any, bytes as any);
+            await writeBinaryAnySafe(target as any, bytes as any);
           } else {
             const { exportWps } = await import('./exporters/wps');
             const bytes = await exportWps(html as any, {});
-            await writeFile(target as any, bytes as any);
+            await writeBinaryAnySafe(target as any, bytes as any);
           }
         }
         currentFilePath = target;
@@ -7067,6 +7090,8 @@ async function saveAs() {
         return;
       }
     }
+
+    // 文本保存：同时支持普通路径与 content://
     try {
       await writeTextFileAnySafe(target, editor.value)
     } catch (e: any) {
@@ -7083,9 +7108,31 @@ async function saveAs() {
     refreshTitle()
     await pushRecent(currentFilePath)
     await renderRecentPanel(false)
-    logInfo('文件另存为成功', { path: target, size: editor.value.length })
+    logInfo('文件另存为成功（系统对话框）', { path: target, size: editor.value.length })
     status.textContent = '文件已保存'
     setTimeout(() => refreshStatus(), 2000)
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    if (msg.includes('invoke') || msg.includes('Tauri')) {
+      alert('此功能需要在 Tauri 桌面应用中使用\n当前运行在浏览器环境')
+    }
+    showError('另存为失败', error)
+  }
+}
+async function saveAs() {
+  try {
+    // Android：系统保存对话框无法保存到应用私有目录（内置库）；改为直接保存到当前库目录。
+    try {
+      const platform = await getPlatform()
+      if (platform === 'android') {
+        await saveAsAndroidToCurrentLibrary()
+        return
+      }
+    } catch {}
+  }
+
+    // 非 Android：保持旧行为
+    await saveAsWithSystemDialog()
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     if (msg.includes('invoke') || msg.includes('Tauri')) {
@@ -9487,6 +9534,19 @@ function showFileMenu() {
       { label: t('file.save'), accel: 'Ctrl+S', action: () => { void saveFile() } },
       { label: t('file.saveas'), accel: 'Ctrl+Shift+S', action: () => { void saveAs() } },
     ]
+
+    // Android：提供“旧方案”入口，让用户通过系统对话框保存到任意目录（SAF 可见目录）。
+    // 说明：默认 saveAs() 已改为“保存到当前库”，这里是补充入口。
+    try {
+      const p = await getPlatform()
+      if (p === 'android') {
+        items.push({
+          label: '保存到指定目录…',
+          accel: '',
+          action: () => { void saveAsWithSystemDialog() },
+        })
+      }
+    } catch {}
     // 移动端不提供：便携模式/配置导入导出（避免误触与启动时覆盖配置）
     if (!isMobileUiFast()) {
       // 配置相关操作移动到“文件”菜单
@@ -11297,6 +11357,9 @@ function bindEvents() {
     isDirty: () => !!dirty,
     normalizePath,
     getLibraryRoot,
+    getSelectedDir: () => {
+      try { return fileTree.getSelectedDir() } catch { return null }
+    },
     renameFileSafe,
     deleteFileSafe,
     openFile: async (p: string) => { await openFile2(p) },
@@ -11329,6 +11392,14 @@ function bindEvents() {
       } else if (treeEl) {
         await fileTree.refresh()
       }
+    },
+    onMoved: (src: string, dst: string) => {
+      try {
+        if (currentFilePath === src) {
+          currentFilePath = dst as any
+          refreshTitle()
+        }
+      } catch {}
     },
     updateTitle: () => { refreshTitle() },
     confirmNative: async (msg: string) => { return await confirmNative(msg) },
