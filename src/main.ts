@@ -9200,6 +9200,7 @@ function installMobileKeyboardInsetCssVar(): void {
         try {
           const px = getMobileKeyboardInsetBottomPx()
           root.style.setProperty('--flymd-kb-inset-bottom', px ? (px + 'px') : '0px')
+          try { document.body?.classList?.toggle('kb-open', px > 0) } catch {}
         } catch {}
       })
     }

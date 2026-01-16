@@ -13,6 +13,9 @@ import { t } from '../i18n'
 import { showConflictDialog, showLocalDeleteDialog, showRemoteDeleteDialog, showUploadMissingRemoteDialog } from '../dialog'
 import { readTextFileAnySafe, writeTextFileAnySafe } from '../core/fsSafe'
 import { persistSafUriPermission, safCreateDir, safCreateFile, safListDir, type AndroidSafDirEntry } from '../platform/androidSaf'
+import { pbkdf2Async } from '@noble/hashes/pbkdf2.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { gcm } from '@noble/ciphers/aes.js'
 
 // 当前同步通知ID（用于更新同一条通知）
 let _currentSyncNotificationId: string | null = null
@@ -1773,7 +1776,11 @@ type EncryptionRuntimeConfig = {
   salt: string
 }
 
-let _encKeyCache: { cacheKey: string; cryptoKey: CryptoKey } | null = null
+type EncryptionKeyRuntime =
+  | { kind: 'webcrypto'; cryptoKey: CryptoKey }
+  | { kind: 'raw'; keyBytes: Uint8Array }
+
+let _encKeyCache: { cacheKey: string; key: EncryptionKeyRuntime } | null = null
 
 function getEncryptionRuntimeConfig(cfg: WebdavSyncConfig): EncryptionRuntimeConfig | null {
   if (!cfg.encryptEnabled) return null
@@ -1784,32 +1791,46 @@ function getEncryptionRuntimeConfig(cfg: WebdavSyncConfig): EncryptionRuntimeCon
   return { key, salt }
 }
 
-async function getCryptoKeyForEncryption(encCfg: EncryptionRuntimeConfig): Promise<CryptoKey | null> {
+async function getCryptoKeyForEncryption(encCfg: EncryptionRuntimeConfig): Promise<EncryptionKeyRuntime | null> {
   try {
     const cacheKey = encCfg.key + '|' + encCfg.salt
-    if (_encKeyCache && _encKeyCache.cacheKey === cacheKey) return _encKeyCache.cryptoKey
-    if (!(crypto as any)?.subtle) {
-      console.warn('[WebDAV Sync] 当前环境不支持 WebCrypto，加密功能不可用')
-      return null
+    if (_encKeyCache && _encKeyCache.cacheKey === cacheKey) return _encKeyCache.key
+
+    // 优先用 WebCrypto：快、异步、且能利用系统加速
+    try {
+      if ((crypto as any)?.subtle) {
+        const te = new TextEncoder()
+        const keyMaterial = await crypto.subtle.importKey(
+          'raw',
+          te.encode(encCfg.key),
+          { name: 'PBKDF2' },
+          false,
+          ['deriveKey']
+        )
+        const saltBytes = base64ToBytes(encCfg.salt)
+        const cryptoKey = await crypto.subtle.deriveKey(
+          { name: 'PBKDF2', salt: saltBytes, iterations: 100_000, hash: 'SHA-256' },
+          keyMaterial,
+          { name: 'AES-GCM', length: 256 },
+          false,
+          ['encrypt', 'decrypt']
+        )
+        const key: EncryptionKeyRuntime = { kind: 'webcrypto', cryptoKey }
+        _encKeyCache = { cacheKey, key }
+        return key
+      }
+    } catch (e) {
+      // Android 某些 WebView：subtle 存在但不支持 PBKDF2 / AES-GCM
+      console.warn('[WebDAV Sync] WebCrypto 不可用，回退到纯 JS 实现', e)
     }
+
+    // 回退：纯 JS PBKDF2 + AES-GCM（保证 Android WebView 可用）
     const te = new TextEncoder()
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw',
-      te.encode(encCfg.key),
-      { name: 'PBKDF2' },
-      false,
-      ['deriveKey']
-    )
     const saltBytes = base64ToBytes(encCfg.salt)
-    const cryptoKey = await crypto.subtle.deriveKey(
-      { name: 'PBKDF2', salt: saltBytes, iterations: 100_000, hash: 'SHA-256' },
-      keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    )
-    _encKeyCache = { cacheKey, cryptoKey }
-    return cryptoKey
+    const keyBytes = await pbkdf2Async(sha256, te.encode(encCfg.key), saltBytes, { c: 100_000, dkLen: 32 })
+    const key: EncryptionKeyRuntime = { kind: 'raw', keyBytes }
+    _encKeyCache = { cacheKey, key }
+    return key
   } catch (e) {
     console.warn('[WebDAV Sync] 加密密钥派生失败', e)
     return null
@@ -1833,8 +1854,14 @@ async function encryptBytesIfEnabled(data: Uint8Array, cfg: WebdavSyncConfig): P
   }
   try {
     const iv = randomBytes(12)
-    const ctBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data)
-    const ct = new Uint8Array(ctBuf)
+    const ct = await (async () => {
+      if (key.kind === 'webcrypto') {
+        const ctBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key.cryptoKey, data)
+        return new Uint8Array(ctBuf)
+      }
+      const aes = gcm(key.keyBytes, iv)
+      return aes.encrypt(data)
+    })()
     const out = new Uint8Array(ENC_MAGIC_BYTES.length + 1 + iv.length + ct.length)
     out.set(ENC_MAGIC_BYTES, 0)
     out[ENC_MAGIC_BYTES.length] = ENC_VERSION
@@ -1860,8 +1887,12 @@ async function decryptBytesIfNeeded(data: Uint8Array, cfg: WebdavSyncConfig): Pr
     const ivEnd = ivStart + 12
     const iv = data.slice(ivStart, ivEnd)
     const ct = data.slice(ivEnd)
-    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct)
-    return new Uint8Array(plainBuf)
+    if (key.kind === 'webcrypto') {
+      const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key.cryptoKey, ct)
+      return new Uint8Array(plainBuf)
+    }
+    const aes = gcm(key.keyBytes, iv)
+    return aes.decrypt(ct)
   } catch (e) {
     console.warn('[WebDAV Sync] 解密失败', e)
     throw new Error('WebDAV 同步解密失败：' + ((e as any)?.message || e))

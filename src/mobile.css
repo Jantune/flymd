@@ -51,14 +51,14 @@
   /* 编辑器全屏 */
   #editor {
     width: 100% !important;
-    height: calc(100vh - var(--mobile-titlebar-total-h, 40px)) !important; /* 减去顶部工具栏 */
+    height: calc(100vh - var(--mobile-titlebar-total-h, 40px) - var(--flymd-kb-inset-bottom, 0px)) !important; /* 减去顶部工具栏 + 键盘遮挡兜底 */
     font-size: 16px !important; /* iOS 防止自动缩放 */
   }
 
   /* 预览区全屏 */
   #preview {
     width: 100% !important;
-    height: calc(100vh - var(--mobile-titlebar-total-h, 40px)) !important;
+    height: calc(100vh - var(--mobile-titlebar-total-h, 40px) - var(--flymd-kb-inset-bottom, 0px)) !important;
   }
 
   /* 顶部工具栏按钮加大（触摸友好） */
@@ -117,7 +117,7 @@ body.platform-mobile #mobile-selection-toolbar {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: calc(var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 12px);
+  bottom: calc(var(--flymd-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + var(--flymd-kb-inset-bottom, 0px) + 12px);
   z-index: 10001;
   display: flex;
   align-items: center;
@@ -164,6 +164,16 @@ body.platform-mobile #mobile-selection-toolbar .mst-btn:active {
     #preview {
       height: calc(100dvh - var(--mobile-titlebar-total-h, 40px)) !important;
     }
+  }
+}
+
+/* 键盘兜底：允许用户手动上滑，把最后一行顶到屏幕中间 */
+@media (max-width: 768px) {
+  body.platform-mobile.kb-open #editor {
+    padding-bottom: calc(16px + var(--flymd-kb-inset-bottom, 0px) + 40vh) !important;
+  }
+  body.platform-mobile.kb-open .ProseMirror {
+    padding-bottom: calc(16px + var(--flymd-kb-inset-bottom, 0px) + 40vh) !important;
   }
 }
 
