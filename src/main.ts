@@ -6896,15 +6896,28 @@ async function saveAsAndroidToCurrentLibrary(): Promise<void> {
     }
   })()
 
-  const rawName = await showInputDialog({
+  const dlgRes = await showFormDialog({
     title: '另存为',
-    message: `保存到：${dirHint}\n提示：要更换目录，请先在“库”侧栏中选中目标文件夹。`,
-    label: '文件名',
-    defaultValue: guessName(),
+    message: `保存到：${dirHint}\n提示：要更换目录，请先在“库”侧栏中选中目标文件夹。\n也可以点“保存到指定目录…”打开系统对话框。`,
+    fields: [{
+      key: 'value',
+      label: '文件名',
+      kind: 'text',
+      value: guessName(),
+      required: true,
+    }],
     submitText: '保存',
     cancelText: '取消',
-    required: true,
+    extraButtons: [{ id: 'system_save', text: '保存到指定目录…' }],
   })
+  if (!dlgRes) return
+  const act = String((dlgRes as any).__action || 'submit')
+  if (act === 'system_save') {
+    const sug = String((dlgRes as any).value || '').trim()
+    await saveAsWithSystemDialog(sug || undefined)
+    return
+  }
+  const rawName = String((dlgRes as any).value || '')
   if (!rawName) return
 
   // 统一清洗文件名，防止目录穿越/非法字符
@@ -6959,7 +6972,7 @@ async function saveAsAndroidToCurrentLibrary(): Promise<void> {
 }
 
 // 旧方案：走系统“另存为”对话框（可保存到任意可见目录/SAF）
-async function saveAsWithSystemDialog(): Promise<void> {
+async function saveAsWithSystemDialog(suggestName?: string): Promise<void> {
   try {
     // 检查 Tauri API
     if (typeof save !== 'function') {
@@ -6969,6 +6982,8 @@ async function saveAsWithSystemDialog(): Promise<void> {
 
     const guessName = () => {
       try {
+        const sug = String(suggestName || '').trim()
+        if (sug) return /\.[a-z0-9]+$/i.test(sug) ? sug : (sug + '.md')
         if (currentFilePath) {
           const s = String(currentFilePath)
           const parts = s.replace(/\\/g, '/').split('/')

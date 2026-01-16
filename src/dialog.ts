@@ -31,6 +31,7 @@ export type FormField = {
   options?: FormFieldOption[]
 }
 export type FormDialogResult = Record<string, string | boolean>
+export type FormDialogButton = { id: string; text: string; primary?: boolean }
 
 // 对话框样式
 const dialogStyles = `
@@ -934,6 +935,8 @@ export function showFormDialog(opts: {
   fields: FormField[]
   submitText?: string
   cancelText?: string
+  // 额外按钮：用于“非提交但需要带回当前输入值”的场景（比如：另存为 -> 系统对话框）
+  extraButtons?: FormDialogButton[]
 }): Promise<FormDialogResult | null> {
   return new Promise((resolve) => {
     injectStyles()
@@ -1058,10 +1061,8 @@ export function showFormDialog(opts: {
 
     cancelBtn.onclick = () => closeDialog(null)
 
-    formEl.onsubmit = (e) => {
-      e.preventDefault()
+    const collectValues = (validateRequired: boolean): FormDialogResult | null => {
       showError('')
-
       const out: FormDialogResult = {}
       for (const f of (opts.fields || [])) {
         if (f.kind === 'checkbox') {
@@ -1072,12 +1073,22 @@ export function showFormDialog(opts: {
         const el = inputs[f.key] as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | undefined
         const raw = el ? String((el as any).value ?? '') : ''
         const v = (f.kind === 'password') ? raw : raw.trim()
-        if (f.required && !v) {
+        if (validateRequired && f.required && !v) {
           showError(`请填写：${f.label || f.key}`)
           try { ;(el as any)?.focus?.() } catch {}
-          return
+          return null
         }
         out[f.key] = v
+      }
+      return out
+    }
+
+    formEl.onsubmit = (e) => {
+      e.preventDefault()
+      const out = collectValues(true)
+      if (!out) return
+      if (opts.extraButtons && opts.extraButtons.length) {
+        ;(out as any).__action = 'submit'
       }
       closeDialog(out)
     }
@@ -1089,6 +1100,18 @@ export function showFormDialog(opts: {
 
     // 把按钮放进 form 内，否则 type="submit" 在某些环境下不会触发表单提交
     buttonsContainer.appendChild(cancelBtn)
+    for (const b of (opts.extraButtons || [])) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'custom-dialog-button' + (b.primary ? ' primary' : '')
+      btn.textContent = b.text
+      btn.onclick = () => {
+        const out = collectValues(false) || {}
+        ;(out as any).__action = b.id
+        closeDialog(out)
+      }
+      buttonsContainer.appendChild(btn)
+    }
     buttonsContainer.appendChild(submitBtn)
     formEl.appendChild(buttonsContainer)
     overlay.appendChild(box)

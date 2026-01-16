@@ -7,7 +7,9 @@ import { openRenameDialog } from './linkDialogs'
 import { newFileSafe, newFolderSafe } from '../fileTree'
 import { showLibraryDeleteDialog } from '../dialog'
 import { dispatchPathDeleted } from '../core/pathEvents'
+import { open } from '@tauri-apps/plugin-dialog'
 import { getPlatform } from '../platform'
+import { isInside } from '../core/fsSafe'
 
 export type LibraryContextMenuDeps = {
   getCurrentFilePath(): string | null
@@ -190,9 +192,7 @@ export function initLibraryContextMenu(deps: LibraryContextMenuDeps): void {
           alert('请先选择库目录')
           return
         }
-        const win = window as any
-        const isInside = win?.flymdIsInside as ((root: string, p: string) => boolean) | undefined
-        if (!isInside || !isInside(root, path)) {
+        if (!isInside(root, path)) {
           alert('仅允许移动库内文件/文件夹')
           return
         }
@@ -216,12 +216,20 @@ export function initLibraryContextMenu(deps: LibraryContextMenuDeps): void {
           }
         } else {
           // 桌面端：继续使用系统“选择目录”
-          const openDlg = win?.flymdOpenDirectory as ((defaultDir: string) => Promise<string>) | undefined
-          if (typeof openDlg !== 'function') {
+          let picked: any = null
+          try {
+            picked = await open({
+              directory: true,
+              multiple: false,
+              defaultPath: defaultDir || root,
+            } as any)
+          } catch {
             alert('该功能需要在 Tauri 应用中使用')
             return
           }
-          dest = await openDlg(defaultDir || root)
+          if (!picked) return
+          const first = Array.isArray(picked) ? picked[0] : picked
+          dest = deps.normalizePath(first)
           if (!dest) return
           if (!isInside(root, dest)) {
             alert('仅允许移动到库目录内')
