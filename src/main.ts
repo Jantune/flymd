@@ -6640,6 +6640,7 @@ function initWindowResize() {
   let startHeight = 0
   let startPosX = 0
   let startPosY = 0
+  let startScaleFactor = 1
   let direction = ''
   const MIN_WIDTH = 600
   const MIN_HEIGHT = 400
@@ -6654,8 +6655,6 @@ function initWindowResize() {
     e.stopPropagation()
 
     direction = target.dataset.resizeDir || ''
-    startX = e.screenX
-    startY = e.screenY
 
     // Linux：使用 Tauri 原生 resize dragging，避免自己算尺寸/位置导致的各种边界 bug。
     if (isLinux && direction in resizeDirMap) {
@@ -6665,6 +6664,12 @@ function initWindowResize() {
         return
       } catch {}
     }
+
+    // MouseEvent.screenX/screenY 是“逻辑像素”（DIP）；而 innerSize/outerPosition 是“物理像素”。
+    // 单位混用会导致高 DPI 下 resize 时窗口乱跳/位置漂移（尤其是从左/上/四角拖拽）。
+    startScaleFactor = await getWindowScaleFactorSafe()
+    startX = e.screenX * startScaleFactor
+    startY = e.screenY * startScaleFactor
 
     ready = false
     resizing = false
@@ -6697,8 +6702,8 @@ function initWindowResize() {
       return
     }
 
-    const deltaX = e.screenX - startX
-    const deltaY = e.screenY - startY
+    const deltaX = (e.screenX * startScaleFactor) - startX
+    const deltaY = (e.screenY * startScaleFactor) - startY
 
     let newWidth = startWidth
     let newHeight = startHeight
@@ -6706,19 +6711,21 @@ function initWindowResize() {
     let newY = startPosY
 
     // 根据方向计算新尺寸和位置
+    const minW = Math.round(MIN_WIDTH * startScaleFactor)
+    const minH = Math.round(MIN_HEIGHT * startScaleFactor)
     if (direction.includes('right') || direction === 'corner-ne' || direction === 'corner-se') {
-      newWidth = Math.max(MIN_WIDTH, startWidth + deltaX)
+      newWidth = Math.max(minW, startWidth + deltaX)
     }
     if (direction.includes('left') || direction === 'corner-nw' || direction === 'corner-sw') {
-      const widthDelta = Math.min(deltaX, startWidth - MIN_WIDTH)
+      const widthDelta = Math.min(deltaX, startWidth - minW)
       newWidth = startWidth - widthDelta
       newX = startPosX + widthDelta
     }
     if (direction.includes('bottom') || direction === 'corner-sw' || direction === 'corner-se') {
-      newHeight = Math.max(MIN_HEIGHT, startHeight + deltaY)
+      newHeight = Math.max(minH, startHeight + deltaY)
     }
     if (direction.includes('top') || direction === 'corner-nw' || direction === 'corner-ne') {
-      const heightDelta = Math.min(deltaY, startHeight - MIN_HEIGHT)
+      const heightDelta = Math.min(deltaY, startHeight - minH)
       newHeight = startHeight - heightDelta
       newY = startPosY + heightDelta
     }
@@ -7125,6 +7132,21 @@ async function restoreWindowStateBeforeSticky(): Promise<void> {
   await restoreWindowStateBeforeStickyCore(deps)
 }
 
+// DPI 缩放：统一获取当前窗口缩放系数（物理像素 / 逻辑像素）。
+// 这是个“务实兜底”：优先用 Tauri 的 scaleFactor，失败再退回到浏览器 devicePixelRatio。
+async function getWindowScaleFactorSafe(): Promise<number> {
+  try {
+    const win = getCurrentWindow()
+    const sf = await win.scaleFactor()
+    if (typeof sf === 'number' && Number.isFinite(sf) && sf > 0.05 && sf < 16) return sf
+  } catch {}
+  try {
+    const dpr = (window as any)?.devicePixelRatio
+    if (typeof dpr === 'number' && Number.isFinite(dpr) && dpr > 0.05 && dpr < 16) return dpr
+  } catch {}
+  return 1
+}
+
 // 退出便签模式时恢复全局状态标志（供关闭后新实例正确启动）
 function resetStickyModeFlags(): void {
   try {
@@ -7142,8 +7164,10 @@ function resetStickyModeFlags(): void {
     try {
       const win = getCurrentWindow()
       const size = await win.innerSize()
-      const minW = 960
-      const minH = 640
+      // innerSize 是物理像素；最小尺寸用“逻辑像素”定义（跟 UI/CSS 同一个世界）。
+      const sf = await getWindowScaleFactorSafe()
+      const minW = Math.round(960 * sf)
+      const minH = Math.round(640 * sf)
       let targetW = size.width
       let targetH = size.height
 
@@ -7167,8 +7191,7 @@ function resetStickyModeFlags(): void {
       if (maxH > 0 && targetH > maxH) targetH = maxH
 
     if (targetW !== size.width || targetH !== size.height) {
-      const { LogicalSize } = await import('@tauri-apps/api/dpi')
-      await win.setSize(new LogicalSize(targetW, targetH))
+      await win.setSize({ type: 'Physical', width: Math.round(targetW), height: Math.round(targetH) })
     }
   } catch {}
 }
@@ -7177,14 +7200,47 @@ function resetStickyModeFlags(): void {
 async function centerWindow(): Promise<void> {
   try {
     const win = getCurrentWindow()
-    const size = await win.innerSize()
-    const screenW = window?.screen?.availWidth || window?.screen?.width || 0
-    const screenH = window?.screen?.availHeight || window?.screen?.height || 0
-    if (!screenW || !screenH) return
-    const x = Math.max(0, Math.round((screenW - size.width) / 2))
-    const y = Math.max(0, Math.round((screenH - size.height) / 2))
-    const { LogicalPosition } = await import('@tauri-apps/api/dpi')
-    await win.setPosition(new LogicalPosition(x, y))
+    const pos = await win.outerPosition()
+    const size = await win.outerSize()
+
+    // 仅当窗口明显跑到屏幕外/几乎不可见时才居中：否则会破坏“记忆窗口位置”的用户预期。
+    let waX = 0
+    let waY = 0
+    let waW = 0
+    let waH = 0
+    try {
+      const mon = await currentMonitor()
+      if (mon && mon.workArea && mon.workArea.position && mon.workArea.size) {
+        waX = mon.workArea.position.x
+        waY = mon.workArea.position.y
+        waW = mon.workArea.size.width
+        waH = mon.workArea.size.height
+      }
+    } catch {}
+    if (!waW || !waH) {
+      // 退化：浏览器 screen 是“逻辑像素”，这里乘缩放系数转为物理像素。
+      const sf = await getWindowScaleFactorSafe()
+      const screenW = window?.screen?.availWidth || window?.screen?.width || 0
+      const screenH = window?.screen?.availHeight || window?.screen?.height || 0
+      if (!screenW || !screenH) return
+      waX = 0
+      waY = 0
+      waW = Math.round(screenW * sf)
+      waH = Math.round(screenH * sf)
+    }
+
+    // 至少露出一小块：否则用户看到的就是“窗口不见了”。这里用 48px 做可见阈值。
+    const VIS = 48
+    const visibleEnough =
+      pos.x + VIS < waX + waW &&
+      pos.y + VIS < waY + waH &&
+      pos.x + size.width - VIS > waX &&
+      pos.y + size.height - VIS > waY
+    if (visibleEnough) return
+
+    const x = Math.round(waX + Math.max(0, (waW - size.width) / 2))
+    const y = Math.round(waY + Math.max(0, (waH - size.height) / 2))
+    await win.setPosition({ type: 'Physical', x, y })
   } catch {}
 }
 
