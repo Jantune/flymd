@@ -8039,6 +8039,11 @@ body.sticky-note-mode .preview {
   padding-right: 8px !important;
 }
 
+/* 便签模式顶部按钮是 fixed 覆盖层：给预览内容留出空间，避免文字“顶到按钮区” */
+body.sticky-note-mode .preview-body {
+  padding-top: 44px !important;
+}
+
 body.sticky-note-mode .preview,
 body.sticky-note-mode .preview-body,
 body.sticky-note-mode .preview-body p,
@@ -8402,7 +8407,7 @@ body.sticky-note-mode .preview-body ol.task-list {
 /* 便签模式下待办项使用flex布局：内容左对齐，按钮右对齐 */
 body.sticky-note-mode li.task-list-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   position: relative;
   width: 100%;
@@ -8413,9 +8418,11 @@ body.sticky-note-mode li.task-list-item {
 body.sticky-note-mode li.task-list-item .task-content {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* 便签模式：待办项按钮容器（右对齐） */
@@ -8427,6 +8434,7 @@ body.sticky-note-mode .sticky-todo-actions {
   flex-shrink: 0;
   align-items: center;
   margin-left: auto;
+  align-self: flex-start;
 }
 
 /* 便签模式下待办项时间默认隐藏 */
@@ -8480,10 +8488,14 @@ body.sticky-note-mode.sticky-note-measuring .task-tooltip {
 body.sticky-note-mode.sticky-note-measuring .preview-body input.task-list-item-checkbox {
   transition: none !important;
   transform: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 body.sticky-note-mode.sticky-note-measuring .sticky-todo-btn {
   transition: none !important;
   transform: none !important;
+  outline: none !important;
+  box-shadow: none !important;
 }
 
 /* 鼠标悬停时显示tooltip */

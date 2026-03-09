@@ -358,26 +358,34 @@ export function createStickyNoteWindowHost(
       const padding = 30
 
       let targetHeight = contentHeight + controlsHeight + padding
+      // 便签的高度上限应该贴近屏幕可用高度：否则内容一多就开始滚动，固定按钮区域会遮挡内容。
+      // 用 screen.availHeight（CSS 像素）限制即可，别跟 Tauri 的物理像素/逻辑像素在这里死磕。
+      const screenAvailH = Math.round(
+        Number(window?.screen?.availHeight || window?.screen?.height || 0),
+      )
+      const stickyMaxHeight =
+        screenAvailH > 0
+          ? Math.max(STICKY_MIN_HEIGHT, Math.round(screenAvailH - 80))
+          : STICKY_MAX_HEIGHT
       targetHeight = Math.max(
         STICKY_MIN_HEIGHT,
-        Math.min(STICKY_MAX_HEIGHT, targetHeight),
+        Math.min(stickyMaxHeight, targetHeight),
       )
 
-      const win = deps.getCurrentWindow()
-      const [currentSize, scaleFactor] = await Promise.all([
-        win.innerSize(),
-        // Windows 常见 125%/150% 缩放：innerSize 是物理像素，setSize(LogicalSize) 需要逻辑像素。
-        // 这里若混用单位，会出现“每触发一次就按缩放比例变大”的离谱行为。
-        typeof win.scaleFactor === 'function' ? win.scaleFactor() : Promise.resolve(1),
-      ])
-      const factor = Number(scaleFactor) || 1
-      const currentLogicalWidth = (Number(currentSize?.width) || 0) / factor
-      const currentLogicalHeight = (Number(currentSize?.height) || 0) / factor
+      // 关键点：别在这里纠结“物理像素 vs 逻辑像素”。
+      // 便签高度自适应的输入（scrollHeight）本身就是 CSS 逻辑像素；
+      // 多显示器混合缩放下，Tauri 的 innerSize/scaleFactor 在某些机器上可能会短暂不一致，
+      // 导致我们用错单位去做比较/取整，从而出现“点一下复选框窗口就跳一下”的离谱行为。
+      // 用当前 WebView 的 viewport（window.innerWidth/innerHeight）做比较与保宽，单位天然一致。
+      const viewportW = Math.round(Number(window.innerWidth) || 0)
+      const viewportH = Math.round(Number(window.innerHeight) || 0)
+      if (!viewportW || !viewportH) return
 
-      if (Math.abs(currentLogicalHeight - targetHeight) > 10) {
+      const win = deps.getCurrentWindow()
+      if (Math.abs(viewportH - targetHeight) > 10) {
         const { LogicalSize } = await deps.importDpi()
         await win.setSize(
-          new LogicalSize(Math.round(currentLogicalWidth), Math.round(targetHeight)),
+          new LogicalSize(viewportW, Math.round(targetHeight)),
         )
       }
     } catch (e) {

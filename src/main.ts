@@ -8767,6 +8767,10 @@ function bindEvents() {
       const hasTask = !!(mUl ? mUl[4] : mOl![5])
       const tail = (mUl ? mUl[5] : mOl![6]) || ''
 
+      // 便签模式：屏蔽任务列表的“回车自动续写下一条”补全动作。
+      // 这是源码编辑器的便利功能，但在便签场景下会导致用户按回车时莫名多出一个空的 "- [ ] "。
+      if (stickyNoteMode && hasTask) return false
+
       const markerPartLen = (() => {
         if (mUl) return (mUl[2] + mUl[3] + (mUl[4] || '')).length
         return (mOl![2] + mOl![3] + mOl![4] + (mOl![5] || '')).length
