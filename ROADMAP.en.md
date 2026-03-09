@@ -2,6 +2,14 @@
 
 [简体中文](ROADMAP.md) | [English](ROADMAP.en.md)
 
+## Update v1.3.3
+- Fixed: Sticky Note auto-resize could jitter under multi-monitor/mixed display scaling, and the button area could cover content when the note grows
+- Improved: Sticky Note height measurement waits one frame to reduce layout jitter on some devices
+- Fixed: Adding a library could do nothing in some cases (path picker values now normalize `file://` / UNC paths)
+- Fixed: In WYSIWYG code-block highlight layer, comments/quotes no longer use italic to avoid selection misalignment on Windows (Refs #81)
+- Fixed: #80 F2 rename now reuses the dialog and supports closing with Esc
+- Updated: Built-in “AI Novel Engine” v0.7.0 — “Strictly follow chapter outline” mode; world/chapter outline supports folders; one-click start flow adds “Generate Chapter 1”
+
 ## Update v1.3.2
 - Fixed: WebDAV sync could fail to run before app exit
 - Fixed: Window size persistence issues in zoom mode
