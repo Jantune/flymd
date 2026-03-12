@@ -364,6 +364,15 @@ Stay connected for the latest updates, preview builds, and tips:
     </td>
     <td>Dinox Sync (dinox-sync)</td>
   </tr>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/ooopzlong">
+        <img src="https://github.com/ooopzlong.png" width="40" alt="ooopzlong avatar" /><br />
+        <sub><b>ooopzlong</b></sub>
+      </a>
+    </td>
+    <td>File icon design</td>
+  </tr>
 </table>
 
 ### Contributing

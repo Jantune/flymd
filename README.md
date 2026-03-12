@@ -381,6 +381,15 @@ FlyMD 拥有丰富的插件生态,支持通过扩展插件无限扩展功能。
 	    </td>
 	    <td>Dinox 同步（dinox-sync）</td>
 	  </tr>
+	  <tr>
+	    <td align="center">
+	      <a href="https://github.com/ooopzlong">
+	        <img src="https://github.com/ooopzlong.png" width="40" alt="ooopzlong 头像" /><br />
+	        <sub><b>ooopzlong</b></sub>
+	      </a>
+	    </td>
+	    <td>文件图标绘制</td>
+	  </tr>
 	</table>
 
 ### 贡献指南
