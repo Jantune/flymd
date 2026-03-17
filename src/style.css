@@ -889,7 +889,7 @@ body.compact-titlebar .window-btn.window-close:hover {
 .editor-gutter {
   position: relative;
   overflow: hidden;
-  color: rgba(15, 23, 42, 0.24);
+  color: rgba(15, 23, 42, 0.14);
   user-select: none;
   pointer-events: none;
 }
@@ -914,20 +914,21 @@ body.compact-titlebar .window-btn.window-close:hover {
   align-items: flex-start;
   justify-content: flex-end;
   padding-right: 12px;
+  font-size: 0.84em;
   white-space: nowrap;
 }
 
 .editor-line-number.active {
-  color: rgba(15, 23, 42, 0.38);
+  color: rgba(15, 23, 42, 0.24);
   font-weight: 500;
 }
 
 body.dark-mode .editor-gutter {
-  color: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.09);
 }
 
 body.dark-mode .editor-line-number.active {
-  color: rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.17);
 }
 
 .editor-surface {
