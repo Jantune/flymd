@@ -341,9 +341,11 @@ export async function enableWysiwygV2(root: HTMLElement, initialMd: string, onCh
   // 规范化内容：空内容也是合法的（新文档或空文档）
   const content0 = normalizeTabIndentText((initialMd || '').toString())
   const content = maybeConvertHtmlTableBlocksToGfm(content0)
-  // 保护 Excel 公式里的 `$`，避免被 remark-math / 输入规则误识别为行内数学
-  const contentForEditor = protectExcelDollarRefs(content)
-  console.log('[WYSIWYG V2] enableWysiwygV2 called, content length:', content.length)
+  // 保护 Excel 公式里的 `$`，并支持 LaTeX 标准定界符 \( 和 \[
+  let contentForEditor = protectExcelDollarRefs(content)
+  // 为编辑器兼容性：临时将 \( / \[ 转换为 $ / $$ 供 Milkdown 识别（在读取模式下已经原生支持渲染）
+  contentForEditor = contentForEditor.replace(/\\\(([\s\S]*?)\\\)/g, '$$$1$')
+  contentForEditor = contentForEditor.replace(/\\\[([\s\S]*?)\\\]/g, '$$$$$1$$$$')
 
   // 仅销毁旧编辑器与观察器，保留外层传入的 root（避免被移除导致空白）
   cleanupEditorOnly()
