@@ -17,44 +17,97 @@ function isValidDelim(src: string, pos: number) {
 }
 
 function math_inline(state: any, silent: boolean) {
-  if (state.src[state.pos] !== '$') return false
-  const res = isValidDelim(state.src, state.pos)
-  if (!res.canOpen) { if (!silent) state.pending += '$'; state.pos += 1; return true }
-  let start = state.pos + 1
-  let match = start
-  while ((match = state.src.indexOf('$', match)) !== -1) {
+  let start, match, res, token, markup, closeMarkup
+
+  if (state.src[state.pos] === '$') {
+    markup = '$'
+    closeMarkup = '$'
+  } else if (state.src.slice(state.pos, state.pos + 2) === '\\(') {
+    markup = '\\('
+    closeMarkup = '\\)'
+  } else {
+    return false
+  }
+
+  if (markup === '$') {
+    res = isValidDelim(state.src, state.pos)
+    if (!res.canOpen) {
+      if (!silent) state.pending += '$'
+      state.pos += 1
+      return true
+    }
+  }
+
+  start = state.pos + markup.length
+  match = start
+  while ((match = state.src.indexOf(closeMarkup, match)) !== -1) {
     let p = match - 1
     while (state.src[p] === '\\') p--
     if (((match - p) & 1) === 1) break
     match++
   }
-  if (match === -1) { if (!silent) state.pending += '$'; state.pos = start; return true }
-  if (match - start === 0) { if (!silent) state.pending += '$$'; state.pos = start + 1; return true }
-  const res2 = isValidDelim(state.src, match)
-  if (!res2.canClose) { if (!silent) state.pending += '$'; state.pos = start; return true }
-  if (!silent) { const t = state.push('math_inline', 'math', 0); t.markup = '$'; t.content = state.src.slice(start, match) }
-  state.pos = match + 1
+
+  if (match === -1) {
+    if (!silent) state.pending += markup
+    state.pos = start
+    return true
+  }
+
+  if (markup === '$' && match - start === 0) {
+    if (!silent) state.pending += '$$'
+    state.pos = start + 1
+    return true
+  }
+
+  if (markup === '$') {
+    const res2 = isValidDelim(state.src, match)
+    if (!res2.canClose) {
+      if (!silent) state.pending += '$'
+      state.pos = start
+      return true
+    }
+  }
+
+  if (!silent) {
+    token = state.push('math_inline', 'math', 0)
+    token.markup = markup
+    token.content = state.src.slice(start, match)
+  }
+  state.pos = match + closeMarkup.length
   return true
 }
 
 function math_block(state: any, start: number, end: number, silent: boolean) {
   let pos = state.bMarks[start] + state.tShift[start]
   let max = state.eMarks[start]
+
+  let openTag = '$$', closeTag = '$$'
+  if (state.src.slice(pos, pos + 2) === '$$') {
+    // default
+  } else if (state.src.slice(pos, pos + 2) === '\\[') {
+    openTag = '\\['
+    closeTag = '\\]'
+  } else {
+    return false
+  }
+
   if (pos + 2 > max) return false
-  if (state.src.slice(pos, pos + 2) !== '$$') return false
   pos += 2
   let firstLine = state.src.slice(pos, max)
   let next = start, lastLine = '', found = false
   if (silent) return true
-  if (firstLine.trim().slice(-2) === '$$') { firstLine = firstLine.trim().slice(0, -2); found = true }
+  if (firstLine.trim().slice(-2) === closeTag) {
+    firstLine = firstLine.trim().slice(0, -2)
+    found = true
+  }
   for (; !found;) {
     next++
     if (next >= end) break
     pos = state.bMarks[next] + state.tShift[next]
     max = state.eMarks[next]
     if (pos < max && state.tShift[next] < state.blkIndent) break
-    if (state.src.slice(pos, max).trim().slice(-2) === '$$') {
-      const lastPos = state.src.slice(0, max).lastIndexOf('$$')
+    if (state.src.slice(pos, max).trim().slice(-2) === closeTag) {
+      const lastPos = state.src.slice(0, max).lastIndexOf(closeTag)
       lastLine = state.src.slice(pos, lastPos)
       found = true
     }
@@ -65,7 +118,8 @@ function math_block(state: any, start: number, end: number, silent: boolean) {
   token.content = (firstLine && firstLine.trim() ? firstLine + '\n' : '') +
                   state.getLines(start + 1, next, state.tShift[start], true) +
                   (lastLine && lastLine.trim() ? lastLine : '')
-  token.map = [start, state.line]; token.markup = '$$'
+  token.map = [start, state.line]
+  token.markup = openTag
   return true
 }
 

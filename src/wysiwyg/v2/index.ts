@@ -2045,7 +2045,20 @@ function enterLatexSourceEdit(hitEl: HTMLElement) {
     const ta = document.createElement('textarea')
     const placeholder = '在此输入Katex公式'
     const displayCode = (isBlock && isNew && !code) ? placeholder : code
-    ta.value = (isBlock ? ('$$\n' + (displayCode || '') + '\n$$') : ('$' + (displayCode || '') + '$'))
+    // 允许编辑器保留原有的定界符，而不是强制转换为 $ / $$
+    if (isBlock) {
+      if (displayCode.trim().startsWith('\\[') && displayCode.trim().endsWith('\\]')) {
+        ta.value = displayCode
+      } else {
+        ta.value = '$$\n' + (displayCode || '') + '\n$$'
+      }
+    } else {
+      if (displayCode.trim().startsWith('\\(') && displayCode.trim().endsWith('\\)')) {
+        ta.value = displayCode
+      } else {
+        ta.value = '$' + (displayCode || '') + '$'
+      }
+    }
     ta.style.width = '100%'
     // 根据公式类型与渲染高度估算一个更宽松的编辑高度，避免复杂公式被挤在两行内
     const baseLines = isBlock ? 4 : 3
@@ -2075,10 +2088,12 @@ function enterLatexSourceEdit(hitEl: HTMLElement) {
       v = String(v || '').trim()
       const isBlk = (mathEl.dataset?.type === 'math_block' || mathEl.tagName === 'DIV')
       if (isBlk) {
-        const m = v.match(/^\s*\$\$\s*[\r\n]?([\s\S]*?)\s*[\r\n]?\$\$\s*$/)
+        // 兼容 $$ 和 \[
+        const m = v.match(/^\s*(?:\$\$|\\\[)\s*[\r\n]?([\s\S]*?)\s*[\r\n]?(?:\$\$|\\\])\s*$/)
         if (m) v = m[1]
       } else {
-        const m = v.match(/^\s*\$([\s\S]*?)\$\s*$/)
+        // 兼容 $ 和 \(
+        const m = v.match(/^\s*(?:\$|\\\()([\s\S]*?)(?:\$|\\\))\s*$/)
         if (m) v = m[1]
       }
       // 更新公式并在块级公式后插入新段落（使用缓存的位置信息）
